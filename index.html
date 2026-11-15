@@ -349,6 +349,45 @@ async function refreshCloudLists(){
  const saveDetails=document.createElement('button');saveDetails.type='button';saveDetails.className='small primary';saveDetails.textContent='💾 Guardar título y asignatura';card.append(saveDetails);
  const detailsNote=document.createElement('p');detailsNote.className='muted';detailsNote.setAttribute('role','status');card.append(detailsNote);
  saveDetails.onclick=async()=>{saveDetails.disabled=true;detailsNote.textContent='Guardando…';try{await teacherChallengeRpc('kaboom_teacher_update_activity',{p_activity_id:activity.id,p_title:titleInput.value.trim(),p_subject:subjectInput.value.trim()});activity.title=titleInput.value.trim();activity.subject=subjectInput.value.trim();heading.textContent=activity.title;detailsNote.textContent='✓ Datos actualizados sin duplicar la actividad.'}catch(e){detailsNote.textContent='Error: '+e.message}finally{saveDetails.disabled=false}};
+
+ const editQuestions=document.createElement('button');editQuestions.type='button';editQuestions.className='small';editQuestions.textContent='✏️ Editar preguntas online';card.append(editQuestions);
+ const questionPanel=document.createElement('div');questionPanel.className='hidden';card.append(questionPanel);
+ editQuestions.onclick=async()=>{
+  if(!questionPanel.classList.contains('hidden')){questionPanel.classList.add('hidden');return}
+  questionPanel.classList.remove('hidden');questionPanel.replaceChildren();const loading=document.createElement('p');loading.textContent='Cargando preguntas de Supabase…';questionPanel.append(loading);
+  try{
+   const res=await fetch(SB_URL+'/rest/v1/kaboom_activities?id=eq.'+encodeURIComponent(activity.id)+'&select=id,title,subject,items',{headers:{apikey:SB_KEY,Authorization:'Bearer '+teacherToken}});
+   if(!res.ok)throw Error('Supabase '+res.status);const rows=await res.json();if(rows.length!==1||!Array.isArray(rows[0].items))throw Error('No se pudieron leer las preguntas.');
+   let items=structuredClone(rows[0].items);
+   const original=JSON.stringify(items);
+   questionPanel.replaceChildren();
+   const hint=document.createElement('p');hint.className='muted';hint.textContent='Editas la actividad original. Las partidas activas bloquean el guardado; los desafíos existentes conservan su rango. No cambies el orden de preguntas usadas en desafíos históricos sin revisar sus efectos.';questionPanel.append(hint);
+   const rowsContainer=document.createElement('div');rowsContainer.className='editorRows';questionPanel.append(rowsContainer);
+   const actions=document.createElement('div');actions.className='row';const add=document.createElement('button');add.type='button';add.textContent='+ Agregar pregunta';const saveQuestions=document.createElement('button');saveQuestions.type='button';saveQuestions.className='primary';saveQuestions.textContent='💾 Guardar preguntas en Supabase';const cancel=document.createElement('button');cancel.type='button';cancel.textContent='Cancelar';actions.append(add,saveQuestions,cancel);questionPanel.append(actions);
+   const result=document.createElement('p');result.className='muted';result.setAttribute('role','status');questionPanel.append(result);
+   function renderQuestionRows(){
+    rowsContainer.replaceChildren();
+    items.forEach((item,i)=>{
+     const wrap=document.createElement('div');wrap.className='editorRow';const number=document.createElement('strong');number.textContent='Pregunta '+(i+1);wrap.append(number);
+     for(const [key,label] of [['q','Pregunta'],['a','Respuesta correcta']]){
+      const field=document.createElement('input');field.value=typeof item[key]==='string'?item[key]:'';field.placeholder=label;field.setAttribute('aria-label',label+' '+(i+1));field.oninput=()=>item[key]=field.value;wrap.append(field)}
+     const wrongLabel=document.createElement('input');wrongLabel.placeholder='Distractores opcionales separados por |';wrongLabel.value=Array.isArray(item.wrong)?item.wrong.join(' | '):'';wrongLabel.setAttribute('aria-label','Respuestas incorrectas '+(i+1));wrongLabel.oninput=()=>item.wrong=wrongLabel.value.split('|').map(v=>v.trim()).filter(Boolean);wrap.append(wrongLabel);
+     const remove=document.createElement('button');remove.type='button';remove.className='small danger';remove.textContent='Eliminar';remove.onclick=()=>{if(!confirm('¿Quitar esta pregunta del borrador?'))return;items.splice(i,1);renderQuestionRows()};wrap.append(remove);rowsContainer.append(wrap)
+    })
+   }
+   add.onclick=()=>{items.push({q:'',a:'',wrong:[]});renderQuestionRows()};
+   cancel.onclick=()=>questionPanel.classList.add('hidden');
+   saveQuestions.onclick=async()=>{
+    if(!items.length||items.some(x=>typeof x.q!=='string'||!x.q.trim()||typeof x.a!=='string'||!x.a.trim())){result.textContent='Completa todas las preguntas y respuestas antes de guardar.';return}
+    if(JSON.stringify(items)===original){result.textContent='No hay cambios por guardar.';return}
+    if(!confirm('¿Guardar '+items.length+' preguntas en la actividad original? Los resultados anteriores no se eliminarán.'))return;
+    saveQuestions.disabled=true;result.textContent='Guardando en Supabase…';
+    try{await teacherChallengeRpc('kaboom_teacher_update_activity',{p_activity_id:activity.id,p_items:items});result.textContent='✓ Preguntas actualizadas. Se conservó el ID de la actividad.';await loadCloudActivities();await refreshCloudLists()}
+    catch(e){result.textContent='No se guardó: '+e.message}finally{saveQuestions.disabled=false}
+   };
+   renderQuestionRows()
+  }catch(e){loading.textContent='Error: '+e.message}
+ };
  const select=document.createElement('select');for(const [value,label] of [['both','🌐 Ambos modos'],['free','🎮 Solo libre'],['challenge','🏆 Solo desafío']]){const o=document.createElement('option');o.value=value;o.textContent=label;select.append(o)}select.value=activity.visibility||'both';
  const label=document.createElement('label');label.textContent='Visibilidad: ';label.append(select);card.append(label);
  const line=document.createElement('div');line.className='row';const save=document.createElement('button');save.textContent='Guardar visibilidad';save.className='small primary';
