@@ -463,11 +463,20 @@ async function fetchOnlineRanking(force=false){
   const res=await fetch(SB_URL+'/rest/v1/rpc/kaboom_public_ranking',{method:'POST',headers:{apikey:SB_KEY,'Content-Type':'application/json'},body:'{}',cache:'no-store'});
   if(!res.ok)throw Error('Supabase '+res.status+': '+(await res.text()).slice(0,250));
   const data=await res.json();if(!Array.isArray(data))throw Error('Respuesta inesperada del ranking');
+  const activityNames=new Map();
+  const addNames=rows=>{for(const row of rows||[]){const id=row.activity_id||row.id;const name=row.activity_title||(row.activity_id?null:row.title);if(id&&name)activityNames.set(String(id),String(name))}};
+  // Catálogos públicos: no requieren iniciar sesión docente.
+  const catalogs=await Promise.allSettled([kaboomRpc('kaboom_catalog_challenges',{}),kaboomRpc('kaboom_catalog_free',{})]);
+  for(const result of catalogs)if(result.status==='fulfilled')addNames(Array.isArray(result.value)?result.value:(result.value?.challenges||[]));
+  // Las listas locales son una fuente adicional para actividades ya vinculadas.
+  const mapping=getPublishedActivityIds();for(const list of lists){const cloudId=mapping[list.id];if(cloudId&&!activityNames.has(cloudId))activityNames.set(cloudId,list.title)}
+  if(onlineChallenge?.activity_id&&!activityNames.has(onlineChallenge.activity_id))activityNames.set(onlineChallenge.activity_id,onlineChallenge.activity_title||onlineChallenge.title);
+  const activityLabel=id=>activityNames.get(String(id))||'Actividad '+String(id).slice(0,8);
   onlineRankCache=data.map(r=>{const lv=Number(r.nivel),mul=braveryMultipliers[lv]||1,total=Number(r.preguntas)||1,correct=Number(r.aciertos)||0,score=Number(r.puntos_finales)||0;
-   return {mode:'challenge',name:r.jugador,listId:r.actividad_id,listTitle:onlineChallenge?.activity_id===r.actividad_id?(onlineChallenge.activity_title||onlineChallenge.title):'Actividad '+String(r.actividad_id).slice(0,8),level:lv,total,correct,score,originalScore:Math.round(score/mul),normalized:Math.round(correct/total*100),originalNormalized:Math.round(correct/total*100),grade:r.calificacion,date:r.fecha,scoringVersion:'v8-weighted-1'};
+   return {mode:'challenge',name:r.jugador,listId:r.actividad_id,listTitle:activityLabel(r.actividad_id),level:lv,total,correct,score,originalScore:Math.round(score/mul),normalized:Math.round(correct/total*100),originalNormalized:Math.round(correct/total*100),grade:r.calificacion,date:r.fecha,scoringVersion:'v8-weighted-1'};
   });
   const sel=$('rankList'),selected=sel.value,ids=[...new Set(data.map(r=>r.actividad_id))];
-  sel.innerHTML='<option value="all">Todas las actividades</option>'+ids.map(id=>'<option value="'+esc(id)+'">'+esc(onlineChallenge?.activity_id===id?(onlineChallenge.activity_title||onlineChallenge.title):'Actividad '+String(id).slice(0,8))+'</option>').join('');
+  sel.innerHTML='<option value="all">Todas las actividades</option>'+ids.map(id=>'<option value="'+esc(id)+'">'+esc(activityLabel(id))+'</option>').join('');
   if(ids.includes(selected))sel.value=selected;
   return onlineRankCache;
  })();
