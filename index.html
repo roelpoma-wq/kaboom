@@ -281,10 +281,12 @@ function exportTeacherResults(){
 $('teacherResultsRefresh').onclick=loadTeacherResults;
 $('teacherResultsExport').onclick=exportTeacherResults;
 for(const id of ['teacherResultsActivity','teacherResultsChallenge','teacherResultsDifficulty','teacherResultsPlayer'])$(id).addEventListener(id==='teacherResultsPlayer'?'input':'change',renderTeacherResults);
+let teacherChallengeRenderRequest=0;
 async function loadTeacherChallenges(){
+ const requestId=++teacherChallengeRenderRequest;
  const status=$('teacherChallengesStatus'),target=$('teacherChallengesList');if(!status||!target||!teacherToken)return;
  status.textContent='Cargando desafíos…';target.replaceChildren();
- try{const data=await teacherChallengeRpc('kaboom_teacher_challenges');if(!Array.isArray(data))throw Error('Respuesta inesperada del servidor');
+ try{const data=await teacherChallengeRpc('kaboom_teacher_challenges');if(requestId!==teacherChallengeRenderRequest)return;if(!Array.isArray(data))throw Error('Respuesta inesperada del servidor');
  status.textContent=data.length+' desafío(s) registrado(s).';
  for(const c of data){
  const card=document.createElement('div');card.className='listCard';
