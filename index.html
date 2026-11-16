@@ -298,7 +298,19 @@ async function loadTeacherChallenges(){
  for(const [value,label] of [['keep',c.pin_required?'Mantener PIN actual':'Mantener sin PIN'],['replace','Establecer nuevo PIN'],['remove','Quitar PIN']]){const option=document.createElement('option');option.value=value;option.textContent=label;pinAction.append(option)}
  const pin=document.createElement('input');pin.type='password';pin.inputMode='numeric';pin.maxLength=8;pin.placeholder='Nuevo PIN de 4 a 8 dígitos';pin.classList.add('hidden');pinAction.onchange=()=>pin.classList.toggle('hidden',pinAction.value!=='replace');card.append(pinLabel,pinAction,pin);
  const save=document.createElement('button');save.type='button';save.className='primary';save.textContent='💾 Guardar cambios';
- const note=document.createElement('p');note.className='muted';note.setAttribute('role','status');card.append(save,note);
+ const remove=document.createElement('button');remove.type='button';remove.textContent='🗑️ Eliminar definitivamente';remove.style.cssText='margin-left:8px;background:#8c1735;color:#fff;border:1px solid #ff5b78';remove.setAttribute('aria-label','Eliminar definitivamente el desafío '+(c.title||''));
+ const note=document.createElement('p');note.className='muted';note.setAttribute('role','status');card.append(save,remove,note);
+ remove.onclick=async()=>{
+  const label=c.title||'Sin título';
+  if(!confirm('⚠️ ELIMINACIÓN DEFINITIVA\\n\\nDesafío: '+label+'\\nPartidas finalizadas: '+(c.attempts_count??0)+'\\n\\nSe eliminarán el desafío, sus sesiones y TODOS sus resultados. Esta acción no se puede deshacer.\\n\\n¿Deseas continuar?'))return;
+  const typed=prompt('Para confirmar, escribe exactamente ELIMINAR:');
+  if(typed!=='ELIMINAR'){note.textContent='Eliminación cancelada.';return}
+  remove.disabled=true;save.disabled=true;note.textContent='Eliminando definitivamente…';
+  try{const result=await teacherChallengeRpc('kaboom_teacher_delete_challenge',{p_challenge_id:c.id});
+   if(result?.deleted!==true)throw Error('No se confirmó la eliminación.');
+   await loadTeacherChallenges();
+  }catch(e){note.textContent='No se pudo eliminar: '+e.message;remove.disabled=false;save.disabled=false}
+ };
  save.onclick=async()=>{if(!title.value.trim()){note.textContent='Escribe un título válido.';return}
  if(pinAction.value==='replace'&&!/^\d{4,8}$/.test(pin.value)){note.textContent='El nuevo PIN debe tener de 4 a 8 dígitos.';return}
  if(c.status==='published'&&state.value!=='published'&&!confirm('¿Cerrar o archivar este desafío? No se borrarán los resultados.'))return;
