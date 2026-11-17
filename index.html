@@ -546,7 +546,7 @@ function renderGameQuestion(content,preference='auto'){
   internal.innerHTML=showContent(content);
   internal.style.fontSize='';
  }
- $('gameScreen')?.classList.toggle('hasExternalQuestion',place==='outside');
+ $('game').classList.toggle('hasExternalQuestion',place==='outside');
 }
 function fitGameText(){
  const question=$('question'),answers=$('answers');
