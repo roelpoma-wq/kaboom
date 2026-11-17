@@ -512,7 +512,7 @@ async function teacherListsRequest(path,options={}){
  if(!teacherToken||currentRole!=='teacher')throw Error('Inicia sesión como profesor para sincronizar.');
  const response=await fetch(SB_URL+'/rest/v1/kaboom_teacher_lists'+path,{...options,headers:{apikey:SB_KEY,Authorization:'Bearer '+teacherToken,'Content-Type':'application/json',...(options.headers||{})}});
  if(!response.ok)throw Error('Supabase '+response.status+': '+(await response.text()).slice(0,180));
- return response.status===204?null:response.json();
+ const raw=await response.text();return raw.trim()?JSON.parse(raw):null;
 }
 async function syncOneTeacherList(list){
  if(!teacherToken||currentRole!=='teacher')return;
@@ -525,7 +525,7 @@ async function syncTeacherLists(){
  try{
   // Respaldo local antes de cualquier combinación. Nunca borramos listas locales.
   const localSnapshot=structuredClone(lists);
-  const cloud=await teacherListsRequest('?select=id,title,subject,items,updated_at&order=updated_at.desc');
+  const cloud=(await teacherListsRequest('?select=id,title,subject,items,updated_at&order=updated_at.desc'))||[];
   const cloudIds=new Set(cloud.map(l=>l.id));
   const localOnly=localSnapshot.filter(l=>!cloudIds.has(l.id));
   for(const l of localOnly)await syncOneTeacherList(l);
