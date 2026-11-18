@@ -473,6 +473,10 @@ async function loadTeacherChallenges(){
  const card=document.createElement('div');card.className='listCard';
  const heading=document.createElement('h3');heading.textContent=c.activity_title||'Actividad';card.append(heading);
  const info=document.createElement('p');info.className='muted';info.textContent='ID: '+c.id+' · Partidas finalizadas: '+(c.attempts_count??0);card.append(info);
+ const countInfo=document.createElement('p');countInfo.className='muted';const rangeSize=Math.max(0,Number(c.range_to)-Number(c.range_from)+1);const totalQuestions=c.question_count??rangeSize;countInfo.textContent='📝 Preguntas del desafío: '+totalQuestions+' · Rango: '+c.range_from+'–'+c.range_to;card.append(countInfo);
+ const editLinkedQuestions=document.createElement('button');editLinkedQuestions.type='button';editLinkedQuestions.className='small';editLinkedQuestions.textContent='✏️ Ver y editar preguntas';card.append(editLinkedQuestions);
+ editLinkedQuestions.onclick=async()=>{editLinkedQuestions.disabled=true;try{tab('lists');await refreshCloudLists();const linked=[...document.querySelectorAll('#cloudListsManager [data-cloud-activity-id]')].find(el=>el.dataset.cloudActivityId===String(c.activity_id));if(!linked)throw Error('No se encontró la actividad vinculada.');linked.scrollIntoView({behavior:'smooth',block:'center'});const edit=linked.querySelector('[data-edit-online-questions]');if(!edit)throw Error('No se encontró el editor de preguntas.');edit.click()}catch(e){alert('No se pudo abrir el editor: '+e.message)}finally{editLinkedQuestions.disabled=false}};
+
  const titleLabel=document.createElement('label');titleLabel.textContent='Título del desafío';const title=document.createElement('input');title.value=c.title||'';title.maxLength=120;card.append(titleLabel,title);
  const stateLabel=document.createElement('label');stateLabel.textContent='Estado';const state=document.createElement('select');
  for(const [value,label] of [['published','🟢 Publicado'],['closed','🔒 Cerrado'],['archived','📦 Archivado']]){const option=document.createElement('option');option.value=value;option.textContent=label;state.append(option)}
@@ -753,7 +757,7 @@ async function refreshCloudLists(){
  if(!res.ok)throw Error('Supabase '+res.status+': '+(await res.text()).slice(0,200));
  const rows=await res.json();status.textContent=rows.length+' actividad(es) en Supabase.';
  for(const activity of rows){
- const card=document.createElement('div');card.className='listCard';
+ const card=document.createElement('div');card.className='listCard';card.dataset.cloudActivityId=activity.id;
  const heading=document.createElement('h3');heading.textContent=activity.title;card.append(heading);
  const titleInput=document.createElement('input');titleInput.value=activity.title;titleInput.maxLength=120;titleInput.setAttribute('aria-label','Título de la actividad');
  const subjectInput=document.createElement('input');subjectInput.value=activity.subject||'';subjectInput.setAttribute('aria-label','Asignatura');
@@ -779,7 +783,7 @@ async function refreshCloudLists(){
  const detailsNote=document.createElement('p');detailsNote.className='muted';detailsNote.setAttribute('role','status');card.append(detailsNote);
  saveDetails.onclick=async()=>{saveDetails.disabled=true;detailsNote.textContent='Guardando…';try{await teacherChallengeRpc('kaboom_teacher_update_activity',{p_activity_id:activity.id,p_title:titleInput.value.trim(),p_subject:subjectInput.value.trim()});activity.title=titleInput.value.trim();activity.subject=subjectInput.value.trim();heading.textContent=activity.title;detailsNote.textContent='✓ Datos actualizados sin duplicar la actividad.'}catch(e){detailsNote.textContent='Error: '+e.message}finally{saveDetails.disabled=false}};
 
- const editQuestions=document.createElement('button');editQuestions.type='button';editQuestions.className='small';editQuestions.textContent='✏️ Editar preguntas online';card.append(editQuestions);
+ const editQuestions=document.createElement('button');editQuestions.type='button';editQuestions.className='small';editQuestions.textContent='✏️ Editar preguntas online';editQuestions.dataset.editOnlineQuestions='true';card.append(editQuestions);
  const questionPanel=document.createElement('div');questionPanel.className='cloudQuestionsModal hidden';questionPanel.setAttribute('role','dialog');questionPanel.setAttribute('aria-modal','true');document.body.append(questionPanel);const closeQuestions=()=>{questionPanel.classList.add('hidden');document.body.classList.remove('cloudQuestionsOpen')};
  editQuestions.onclick=async()=>{
   if(!questionPanel.classList.contains('hidden')){closeQuestions();return}
