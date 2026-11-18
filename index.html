@@ -225,7 +225,7 @@ body.role-student .primary{background:linear-gradient(120deg,#ffb52e,#ff617e);co
 body.role-teacher #roleIndicator{display:inline-flex;background:#5b347e;color:#ffe6ff;border:1px solid #b774e6}
 body.role-student #roleIndicator{display:inline-flex;background:#214a85;color:#d8efff;border:1px solid #4f9bff}
 @media(max-width:650px){#roleIndicator{font-size:10px;padding:6px 10px}body.role-teacher header,body.role-student header{padding:8px}}
-</style><style>
+ .cloudQuestionsModal{position:fixed;inset:0;z-index:99999;background:#10152b;overflow-y:auto;padding:clamp(12px,3vw,30px);color:#f8faff}.cloudQuestionsModal.hidden{display:none!important}.cloudQuestionsModal>.cloudQuestionsHeader,.cloudQuestionsModal>.muted,.cloudQuestionsModal>.cloudQuestionsRows,.cloudQuestionsModal>.row{max-width:1100px;margin:0 auto 16px}.cloudQuestionsHeader{display:flex;align-items:center;justify-content:space-between;gap:14px;position:sticky;top:0;background:#10172f;padding:12px;border-radius:14px;z-index:2}.cloudQuestionsRows{display:grid;gap:16px}.cloudQuestionsRows .editorRow{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:16px;background:#1b2546;border:1px solid #465582;border-radius:16px}.cloudQuestionsRows .editorRow>strong,.cloudQuestionsRows .editorRow>.muted,.cloudQuestionsRows .editorRow>.cloudWrongGrid{grid-column:1/-1}.cloudWrongGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.cloudQuestionsOpen{overflow:hidden}@media(max-width:650px){.cloudQuestionsRows .editorRow,.cloudWrongGrid{grid-template-columns:1fr}.cloudQuestionsRows .editorRow>strong,.cloudQuestionsRows .editorRow>.muted,.cloudQuestionsRows .editorRow>.cloudWrongGrid{grid-column:1}} </style><style>
 #play #setup .fields{align-items:start}
 #play #setup .field{min-width:0}
 #playerLabel{font-size:15px!important;letter-spacing:.7px!important;line-height:1.4!important;margin-bottom:7px!important}
@@ -780,18 +780,19 @@ async function refreshCloudLists(){
  saveDetails.onclick=async()=>{saveDetails.disabled=true;detailsNote.textContent='Guardando…';try{await teacherChallengeRpc('kaboom_teacher_update_activity',{p_activity_id:activity.id,p_title:titleInput.value.trim(),p_subject:subjectInput.value.trim()});activity.title=titleInput.value.trim();activity.subject=subjectInput.value.trim();heading.textContent=activity.title;detailsNote.textContent='✓ Datos actualizados sin duplicar la actividad.'}catch(e){detailsNote.textContent='Error: '+e.message}finally{saveDetails.disabled=false}};
 
  const editQuestions=document.createElement('button');editQuestions.type='button';editQuestions.className='small';editQuestions.textContent='✏️ Editar preguntas online';card.append(editQuestions);
- const questionPanel=document.createElement('div');questionPanel.className='hidden';card.append(questionPanel);
+ const questionPanel=document.createElement('div');questionPanel.className='cloudQuestionsModal hidden';questionPanel.setAttribute('role','dialog');questionPanel.setAttribute('aria-modal','true');document.body.append(questionPanel);const closeQuestions=()=>{questionPanel.classList.add('hidden');document.body.classList.remove('cloudQuestionsOpen')};
  editQuestions.onclick=async()=>{
-  if(!questionPanel.classList.contains('hidden')){questionPanel.classList.add('hidden');return}
-  questionPanel.classList.remove('hidden');questionPanel.replaceChildren();const loading=document.createElement('p');loading.textContent='Cargando preguntas de Supabase…';questionPanel.append(loading);
+  if(!questionPanel.classList.contains('hidden')){closeQuestions();return}
+  questionPanel.classList.remove('hidden');document.body.classList.add('cloudQuestionsOpen');questionPanel.replaceChildren();const loading=document.createElement('p');loading.textContent='Cargando preguntas de Supabase…';questionPanel.append(loading);
   try{
    const res=await fetch(SB_URL+'/rest/v1/kaboom_activities?id=eq.'+encodeURIComponent(activity.id)+'&select=id,title,subject,items',{headers:{apikey:SB_KEY,Authorization:'Bearer '+teacherToken}});
    if(!res.ok)throw Error('Supabase '+res.status);const rows=await res.json();if(rows.length!==1||!Array.isArray(rows[0].items))throw Error('No se pudieron leer las preguntas.');
    let items=structuredClone(rows[0].items);
    const original=JSON.stringify(items);
    questionPanel.replaceChildren();
+   const header=document.createElement('div');header.className='cloudQuestionsHeader';const title=document.createElement('h2');title.textContent='✏️ '+activity.title;const close=document.createElement('button');close.textContent='✕ Cerrar';close.onclick=closeQuestions;header.append(title,close);questionPanel.append(header);
    const hint=document.createElement('p');hint.className='muted';hint.textContent='Editas la actividad original. Las partidas activas bloquean el guardado; los desafíos existentes conservan su rango. No cambies el orden de preguntas usadas en desafíos históricos sin revisar sus efectos.';questionPanel.append(hint);
-   const rowsContainer=document.createElement('div');rowsContainer.className='editorRows';questionPanel.append(rowsContainer);
+   const rowsContainer=document.createElement('div');rowsContainer.className='cloudQuestionsRows';questionPanel.append(rowsContainer);
    const actions=document.createElement('div');actions.className='row';const add=document.createElement('button');add.type='button';add.textContent='+ Agregar pregunta';const saveQuestions=document.createElement('button');saveQuestions.type='button';saveQuestions.className='primary';saveQuestions.textContent='💾 Guardar preguntas en Supabase';const cancel=document.createElement('button');cancel.type='button';cancel.textContent='Cancelar';actions.append(add,saveQuestions,cancel);questionPanel.append(actions);
    const result=document.createElement('p');result.className='muted';result.setAttribute('role','status');questionPanel.append(result);
    function renderQuestionRows(){
@@ -800,12 +801,12 @@ async function refreshCloudLists(){
      const wrap=document.createElement('div');wrap.className='editorRow';const number=document.createElement('strong');number.textContent='Pregunta '+(i+1);wrap.append(number);
      for(const [key,label] of [['q','Pregunta'],['a','Respuesta correcta']]){
       const field=document.createElement('input');field.value=typeof item[key]==='string'?item[key]:'';field.placeholder=label;field.setAttribute('aria-label',label+' '+(i+1));field.oninput=()=>item[key]=field.value;wrap.append(field)}
-     const wrongLabel=document.createElement('input');wrongLabel.placeholder='Distractores opcionales separados por |';wrongLabel.value=Array.isArray(item.wrong)?item.wrong.join(' | '):'';wrongLabel.setAttribute('aria-label','Respuestas incorrectas '+(i+1));wrongLabel.oninput=()=>item.wrong=wrongLabel.value.split('|').map(v=>v.trim()).filter(Boolean);wrap.append(wrongLabel);
+     const note=document.createElement('p');note.className='muted';note.textContent='Alternativas incorrectas (opcionales). Las faltantes se generan con respuestas de otras preguntas y pueden variar en el juego.';wrap.append(note);const wrongFields=document.createElement('div');wrongFields.className='cloudWrongGrid';for(let j=0;j<3;j++){const field=document.createElement('input');field.value=(item.wrong||[])[j]||'';field.placeholder='Alternativa incorrecta '+(j+1);field.oninput=()=>{item.wrong=[...wrongFields.querySelectorAll('input')].map(x=>x.value.trim()).filter(Boolean)};wrongFields.append(field)}wrap.append(wrongFields);
      const remove=document.createElement('button');remove.type='button';remove.className='small danger';remove.textContent='Eliminar';remove.onclick=()=>{if(!confirm('¿Quitar esta pregunta del borrador?'))return;items.splice(i,1);renderQuestionRows()};wrap.append(remove);rowsContainer.append(wrap)
     })
    }
    add.onclick=()=>{items.push({q:'',a:'',wrong:[]});renderQuestionRows()};
-   cancel.onclick=()=>questionPanel.classList.add('hidden');
+   cancel.onclick=closeQuestions;
    saveQuestions.onclick=async()=>{
     if(!items.length||items.some(x=>typeof x.q!=='string'||!x.q.trim()||typeof x.a!=='string'||!x.a.trim())){result.textContent='Completa todas las preguntas y respuestas antes de guardar.';return}
     if(JSON.stringify(items)===original){result.textContent='No hay cambios por guardar.';return}
@@ -815,7 +816,7 @@ async function refreshCloudLists(){
     catch(e){result.textContent='No se guardó: '+e.message}finally{saveQuestions.disabled=false}
    };
    renderQuestionRows()
-  }catch(e){loading.textContent='Error: '+e.message}
+  }catch(e){questionPanel.textContent='Error: '+e.message;const back=document.createElement('button');back.textContent='Cerrar';back.onclick=closeQuestions;questionPanel.append(back)}
  };
  const select=document.createElement('select');for(const [value,label] of [['both','🌐 Ambos modos'],['free','🎮 Solo libre'],['challenge','🏆 Solo desafío']]){const o=document.createElement('option');o.value=value;o.textContent=label;select.append(o)}select.value=activity.visibility||'both';
  const label=document.createElement('label');label.textContent='Visibilidad: ';label.append(select);card.append(label);
