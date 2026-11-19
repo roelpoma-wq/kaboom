@@ -71,14 +71,20 @@ async function kaboomRpc(fn,args,timeoutMs=0){
   const raw=await response.text();
   let data;
   try{data=raw?JSON.parse(raw):null}catch{data=raw}
-  if(!response.ok)throw Error(data?.message||data?.error||('Supabase '+response.status));
+  if(!response.ok){
+   const error=Error(data?.message||data?.error||('Supabase '+response.status));
+   error.retryable=[408,429,500,502,503,504].includes(response.status);
+   throw error;
+  }
   return data;
  })();
  if(!timeoutMs)return request;
  let timer;
  const timeout=new Promise((resolve,reject)=>{
   timer=setTimeout(()=>{
-   reject(Error('La conexión tardó demasiado. Puedes reintentar en esta partida.'));
+   const error=Error('La conexión tardó demasiado. Puedes reintentar en esta partida.');
+   error.retryable=true;
+   reject(error);
    if(controller)controller.abort();
   },timeoutMs);
  });
@@ -208,18 +214,33 @@ let onlineVerifiedPin='';const verifiedChallengePins=new Map();
 function challengeRequiresPin(ch){return ch?.pin_required!==false&&ch?.requires_pin!==false&&ch?.has_pin!==false&&ch?.pin_optional!==true}
 function ensureOnlinePin(){if(!$('onlinePinField')){const field=document.createElement('div');field.className='field';field.id='onlinePinField';field.innerHTML='<label for="onlinePin">🔐 PIN del desafío</label><input id="onlinePin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="PIN entregado por el profesor">';$('difficulty').closest('.field').after(field)}$('onlinePinField').classList.add('hidden')}
 function isExpiredOnlineSession(e){const message=String(e?.message||e||'');return /caduc|expir|inactiv|abandon|sesión.{0,45}(finaliz|cerrad|no existe|no encontrada)|session.{0,45}(expired|abandon|not found)|partida.{0,45}(no activa|abandonada|caducada)/i.test(message)}
-function showExpiredOnlineSession(){clearInterval(tick);clearTimeout(questionTimeout);clearTimeout(countdownTimer);onlineBusy=false;onlineSession=null;onlineQuestion=null;state=null;lock=true;paused=false;$('pauseScreen').classList.add('hidden');$('pause').disabled=false;$('game').classList.add('hidden');$('setup').classList.remove('hidden');showOverlay('<div style="font-size:58px" aria-hidden="true">⌛</div><h2>Partida caducada</h2><p>Tu desafío terminó porque pasaron más de 10 minutos sin actividad.</p><p class="muted">Esta sesión ya no se puede continuar. Para volver a jugar, inicia un nuevo intento si todavía tienes disponibles.</p><button class="primary" id="expiredOnlineBack" type="button">🏆 Volver a los desafíos</button>');$('expiredOnlineBack').onclick=()=>{hideOverlay();showEntry('challenges',true)}}
+function showExpiredOnlineSession(){clearOnlineWait();clearInterval(tick);clearTimeout(questionTimeout);clearTimeout(countdownTimer);onlineBusy=false;onlineSession=null;onlineQuestion=null;state=null;lock=true;paused=false;$('pauseScreen').classList.add('hidden');$('pause').disabled=false;$('game').classList.add('hidden');$('setup').classList.remove('hidden');showOverlay('<div style="font-size:58px" aria-hidden="true">⌛</div><h2>Partida caducada</h2><p>Tu desafío terminó porque pasaron más de 10 minutos sin actividad.</p><p class="muted">Esta sesión ya no se puede continuar. Para volver a jugar, inicia un nuevo intento si todavía tienes disponibles.</p><button class="primary" id="expiredOnlineBack" type="button">🏆 Volver a los desafíos</button>');$('expiredOnlineBack').onclick=()=>{hideOverlay();showEntry('challenges',true)}}
 function onlineError(e){$('setupError').textContent=e?.message||String(e);onlineBusy=false;const b=$('start');b.disabled=false;b.textContent='💥 ¡Empezar partida!'}
-async function startOnlineGame(){if(onlineBusy)return;if(!onlineChallenge){$('setupError').textContent='Primero selecciona un desafío online.';return}const name=$('player').value.trim(),pin=verifiedChallengePins.get(String(onlineChallenge.id))||onlineVerifiedPin,difficulty=Number($('difficulty').value);if(name.length<2||name.length>40||!name.match(/^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]+$/)||(challengeRequiresPin(onlineChallenge)&&!pin)){$('setupError').textContent=challengeRequiresPin(onlineChallenge)?'Primero verifica el PIN del desafío.':'Escribe tu nombre.';return}onlineBusy=true;$('start').disabled=true;$('start').textContent='Conectando…';$('setupError').textContent='';try{const result=await kaboomRpc('kaboom_start_game',{p_challenge_id:onlineChallenge.id,p_player_name:name,p_pin:pin,p_difficulty:difficulty});showAttemptNotice(result.remaining_attempts,'started');const sessionId=result.session_id||result.id,token=result.session_token;if(!sessionId||!token)throw Error('El servidor no devolvió una sesión válida.');onlineSession={id:sessionId,token,challenge:onlineChallenge,player:name,level:difficulty};state={online:true,name,level:difficulty,levelData:levels[difficulty],lives:result.lives??levels[difficulty].lives,score:0,streak:0,correct:0,index:0,total:result.question_count||result.question_total||0,timeLimit:levels[difficulty].seconds,deadline:0};$('pause').disabled=true;lastClockTick=0;$('bombArea').classList.remove('critical','crack-hit');$('setup').classList.add('hidden');lock=true;countdown(5)}catch(e){onlineSession=null;state=null;$('game').classList.add('hidden');$('setup').classList.remove('hidden');onlineError(e);refreshChallengeAttempts()}finally{onlineBusy=false;$('start').disabled=false;$('start').textContent='💥 ¡Empezar partida!'}}
+async function startOnlineGame(){if(onlineBusy)return;if(!onlineChallenge){$('setupError').textContent='Primero selecciona un desafío online.';return}const name=$('player').value.trim(),pin=verifiedChallengePins.get(String(onlineChallenge.id))||onlineVerifiedPin,difficulty=Number($('difficulty').value);if(name.length<2||name.length>40||!name.match(/^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]+$/)||(challengeRequiresPin(onlineChallenge)&&!pin)){$('setupError').textContent=challengeRequiresPin(onlineChallenge)?'Primero verifica el PIN del desafío.':'Escribe tu nombre.';return}onlineBusy=true;$('start').disabled=true;$('start').textContent='Conectando…';$('setupError').textContent='';try{const result=await kaboomRpc('kaboom_start_game',{p_challenge_id:onlineChallenge.id,p_player_name:name,p_pin:pin,p_difficulty:difficulty});showAttemptNotice(result.remaining_attempts,'started');const sessionId=result.session_id||result.id,token=result.session_token;if(!sessionId||!token)throw Error('El servidor no devolvió una sesión válida.');onlineSession={id:sessionId,token,challenge:onlineChallenge,player:name,level:difficulty};state={online:true,name,level:difficulty,levelData:levels[difficulty],lives:result.lives??levels[difficulty].lives,score:0,streak:0,correct:0,index:0,total:result.question_count||result.question_total||0,timeLimit:levels[difficulty].seconds,deadline:0};$('pause').disabled=true;lastClockTick=0;$('bombArea').classList.remove('critical','crack-hit');$('setup').classList.add('hidden');lock=true;$('time').textContent='';$('timeBar').style.width='100%';updateFuse(1);$('answers').textContent='';renderGameQuestion('','auto');countdown(5)}catch(e){onlineSession=null;state=null;$('game').classList.add('hidden');$('setup').classList.remove('hidden');onlineError(e);refreshChallengeAttempts()}finally{onlineBusy=false;$('start').disabled=false;$('start').textContent='💥 ¡Empezar partida!'}}
+let onlineWaitTimer;
 function showOnlineWait(label){
- const time=$('time');
- time.textContent='•••';
- time.classList.add('onlineWaiting');
- $('onlineWaitStatus').textContent=label;
+ clearOnlineWait();
+ onlineWaitTimer=setTimeout(()=>{
+  $('onlineWaitIndicator').classList.remove('hidden');
+  $('onlineWaitStatus').textContent=label;
+ },300);
 }
 function clearOnlineWait(){
- $('time').classList.remove('onlineWaiting');
+ clearTimeout(onlineWaitTimer);
+ $('onlineWaitIndicator').classList.add('hidden');
  $('onlineWaitStatus').textContent='';
+}
+async function submitOnlineAnswer(session,question,value){
+ const args={p_session_id:session.id,p_session_token:session.token,p_question_nonce:question.question_nonce,p_answer:value};
+ try{
+  return await kaboomRpc('kaboom_submit_answer',args,15000);
+ }catch(error){
+  if(onlineSession!==session||(!error.retryable&&!(error instanceof TypeError)))throw error;
+  await new Promise(resolve=>setTimeout(resolve,400));
+  if(onlineSession!==session)throw error;
+  // Supabase returns the stored result when the same question nonce was already processed.
+  return kaboomRpc('kaboom_submit_answer',args,15000);
+ }
 }
 function syncOnlineClock(reply,requestedAt){
  const receivedAt=performance.now();
@@ -229,16 +250,15 @@ function syncOnlineClock(reply,requestedAt){
  // Give the server's acceptance window time to close before sending a no-answer timeout.
  state.answerCutoff=receivedAt+Math.max(0,remaining+state.answerGrace);
 }
-async function onlineNextQuestion(){closeLongQuestion(true);if(!onlineSession)return;const session=onlineSession;clearInterval(tick);lock=true;showOnlineWait('Cargando pregunta');$('timeBar').style.width='100%';updateFuse(1);try{const requestedAt=performance.now();const q=await kaboomRpc('kaboom_get_question',{p_session_id:session.id,p_session_token:session.token},12000);if(onlineSession!==session)return;if(q?.expired||q?.status==='abandoned'){showExpiredOnlineSession();return}if(q?.finished===true){finishOnline(q);return}if(!q?.question_nonce||typeof q.question!=='string'||!Array.isArray(q.options)||!q.options.length||q.options.some(option=>typeof option!=='string'))throw Error('No se recibió la pregunta completa.');onlineQuestion=q;state.index=Number(q.question_number||1)-1;state.total=Number(q.question_total||state.total||1);state.lives=Number(q.lives??state.lives);state.score=Number(q.score??state.score);state.correct=Number(q.correct_count??state.correct);state.timeLimit=Number(q.seconds_per_question||levels[state.level].seconds);state.answerGrace=Math.max(0,Number(q.answer_grace_ms)||0);
+async function onlineNextQuestion(){closeLongQuestion(true);if(!onlineSession)return;const session=onlineSession;clearInterval(tick);lock=true;showOnlineWait('Cargando pregunta');try{const requestedAt=performance.now();const q=await kaboomRpc('kaboom_get_question',{p_session_id:session.id,p_session_token:session.token},25000);if(onlineSession!==session)return;if(q?.expired||q?.status==='abandoned'){showExpiredOnlineSession();return}if(q?.finished===true){finishOnline(q);return}if(!q?.question_nonce||typeof q.question!=='string'||!Array.isArray(q.options)||!q.options.length||q.options.some(option=>typeof option!=='string'))throw Error('No se recibió la pregunta completa.');onlineQuestion=q;state.index=Number(q.question_number||1)-1;state.total=Number(q.question_total||state.total||1);state.lives=Number(q.lives??state.lives);state.score=Number(q.score??state.score);state.correct=Number(q.correct_count??state.correct);state.timeLimit=Number(q.seconds_per_question||levels[state.level].seconds);state.answerGrace=Math.max(0,Number(q.answer_grace_ms)||0);
 
-renderGameQuestion(q.question,q.question_placement||'auto');$('answers').innerHTML='';const options=Array.isArray(q.options)?q.options:[];options.forEach((value,i)=>{const btn=document.createElement('button');btn.className='answer';btn.innerHTML='<span style="margin-right:7px;color:#ffd45c">'+('ABCD'[i]||'')+'.</span> '+showContent(value);btn.onclick=()=>onlineAnswer(value,btn);$('answers').append(btn)});hud();scheduleGameTextFit();
+renderGameQuestion(q.question,q.question_placement||'auto');$('answers').innerHTML='';const options=Array.isArray(q.options)?q.options:[];options.forEach((value,i)=>{const btn=document.createElement('button');btn.className='answer';btn.innerHTML='<span style="margin-right:7px;color:#ffd45c">'+('ABCD'[i]||'')+'.</span> '+showContent(value);btn.onclick=()=>onlineAnswer(value,btn);$('answers').append(btn)});hud();fitGameText();
  syncOnlineClock(q,requestedAt);
  clearOnlineWait();
  paintGameClock();
- lock=false;startClock()}catch(e){if(onlineSession!==session)return;if(isExpiredOnlineSession(e)){showExpiredOnlineSession();return}lock=true;clearInterval(tick);showOverlay('<h2>Problema de conexión</h2><p>'+esc(e.message)+'</p><button class="primary" id="retryOnline">Reintentar</button>');$('retryOnline').onclick=()=>{hideOverlay();onlineNextQuestion()}}}
-async function onlineAnswer(value,button){if(!onlineSession||!onlineQuestion||lock)return;const session=onlineSession;const question=onlineQuestion;lock=true;clearInterval(tick);const frozenTime=$('time').textContent;showOnlineWait('Enviando respuesta');$('answers').querySelectorAll('button').forEach(b=>b.disabled=true);try{const r=await kaboomRpc('kaboom_submit_answer',{p_session_id:session.id,p_session_token:session.token,p_question_nonce:question.question_nonce,p_answer:value},12000);if(onlineSession!==session)return;if(r?.expired||r?.status==='abandoned'){showExpiredOnlineSession();return}if(typeof r?.correct!=='boolean')throw Error('No se recibió la confirmación de la respuesta.');
+ lock=false;startClock()}catch(e){if(onlineSession!==session)return;clearOnlineWait();if(isExpiredOnlineSession(e)){showExpiredOnlineSession();return}lock=true;clearInterval(tick);showOverlay('<h2>Problema de conexión</h2><p>'+esc(e.message)+'</p><button class="primary" id="retryOnline">Reintentar</button>');$('retryOnline').onclick=()=>{hideOverlay();onlineNextQuestion()}}}
+async function onlineAnswer(value,button,retry=false){if(!onlineSession||!onlineQuestion||lock)return;const session=onlineSession;const question=onlineQuestion;lock=true;clearInterval(tick);if(!retry)paintGameClock();showOnlineWait('Enviando respuesta');$('answers').querySelectorAll('button').forEach(b=>b.disabled=true);try{const r=await submitOnlineAnswer(session,question,value);if(onlineSession!==session)return;if(r?.expired||r?.status==='abandoned'){showExpiredOnlineSession();return}if(typeof r?.correct!=='boolean')throw Error('No se recibió la confirmación de la respuesta.');
 clearOnlineWait();
-$('time').textContent=frozenTime==='•••'?Math.max(0,(state.deadline-performance.now())/1000).toFixed(1)+' s':frozenTime;
 if(r.time_expired===true||(value===null&&r.correct!==true)){
  toast('⏱️ Tiempo agotado');
 }else if(r.correct===true){
@@ -247,8 +267,10 @@ if(r.time_expired===true||(value===null&&r.correct!==true)){
  if(points!=null)toast('+'+points+' puntos');
 }else{
  button?.classList.add('bad');explode();
-}state.score=Number(r.score??state.score);state.lives=Number(r.lives??state.lives);state.correct=Number(r.correct_count??state.correct);hud();await new Promise(resolve=>setTimeout(resolve,r.correct?550:750));if(onlineSession===session)await onlineNextQuestion()}catch(e){if(onlineSession!==session)return;if(isExpiredOnlineSession(e)){showExpiredOnlineSession();return}showOverlay('<h2>No se pudo registrar la respuesta</h2><p>'+esc(e.message)+'</p><button class="primary" id="retryOnlineAnswer">Reintentar envío</button>');$('retryOnlineAnswer').onclick=()=>{if(onlineSession!==session||onlineQuestion!==question)return;hideOverlay();lock=false;onlineAnswer(value,button)}}}
-function finishOnline(q){clearInterval(tick);lock=true;const s=state,session=onlineSession;onlineSession=null;onlineQuestion=null;state=null;const correct=Number(q.correct_count??s.correct),total=Number(q.question_total??s.total),base=Number(q.score??s.score),mult=braveryMultipliers[s.level]||1,final=Math.round(base*mult),grade=gradeFor(total?correct/total*100:0,s.level);$('game').classList.add('hidden');$('setup').classList.remove('hidden');$('pause').disabled=false;showOverlay('<div class="muted">🏆 DESAFÍO ONLINE FINALIZADO</div><div class="grade grade-'+grade.replace('+','plus')+'">'+esc(grade)+'</div><h2>'+esc(session.player)+'</h2><p>🎯 '+correct+'/'+total+' aciertos</p><p>⭐ Puntos originales: '+base+'</p><p>⚡ Bonus por Valentía: ×'+mult+'</p><div class="braveryTotal" style="align-items:center;margin:12px auto"><small>🏅 TOTAL FINAL</small><span>'+final+' PUNTOS</span></div><p class="muted">El resultado se registra en Supabase al finalizar la partida.</p><button class="primary" id="onlineAgain">Volver a desafíos</button>');$('onlineAgain').onclick=()=>{hideOverlay();showEntry('challenges',true)}}
+}state.score=Number(r.score??state.score);state.lives=Number(r.lives??state.lives);state.correct=Number(r.correct_count??state.correct);hud();await new Promise(resolve=>setTimeout(resolve,r.correct?550:750));if(onlineSession!==session)return;
+ if(r.finished===true){finishOnline(r);return}
+ await onlineNextQuestion()}catch(e){if(onlineSession!==session)return;clearOnlineWait();if(isExpiredOnlineSession(e)){showExpiredOnlineSession();return}showOverlay('<h2>No se pudo registrar la respuesta</h2><p>'+esc(e.message)+'</p><button class="primary" id="retryOnlineAnswer">Reintentar envío</button>');$('retryOnlineAnswer').onclick=()=>{if(onlineSession!==session||onlineQuestion!==question)return;hideOverlay();lock=false;onlineAnswer(value,button,true)}}}
+function finishOnline(q){clearOnlineWait();clearInterval(tick);lock=true;const s=state,session=onlineSession;onlineSession=null;onlineQuestion=null;state=null;const correct=Number(q.correct_count??s.correct),total=Number(q.question_total??s.total),base=Number(q.score??s.score),mult=braveryMultipliers[s.level]||1,final=Math.round(base*mult),grade=gradeFor(total?correct/total*100:0,s.level);$('game').classList.add('hidden');$('setup').classList.remove('hidden');$('pause').disabled=false;showOverlay('<div class="muted">🏆 DESAFÍO ONLINE FINALIZADO</div><div class="grade grade-'+grade.replace('+','plus')+'">'+esc(grade)+'</div><h2>'+esc(session.player)+'</h2><p>🎯 '+correct+'/'+total+' aciertos</p><p>⭐ Puntos originales: '+base+'</p><p>⚡ Bonus por Valentía: ×'+mult+'</p><div class="braveryTotal" style="align-items:center;margin:12px auto"><small>🏅 TOTAL FINAL</small><span>'+final+' PUNTOS</span></div><p class="muted">El resultado se registra en Supabase al finalizar la partida.</p><button class="primary" id="onlineAgain">Volver a desafíos</button>');$('onlineAgain').onclick=()=>{hideOverlay();showEntry('challenges',true)}}
 function enterStudentGame(){closeEntry();refreshSelects();$('changeMode').classList.remove('hidden');document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('hidden',!['play','ranking'].includes(b.dataset.tab)));tab('play');if(activeMode==='free')refreshOnlineFreeLists()}
 $('entryBack').onclick=()=>showEntry(entryStep==='teacher'||entryStep==='mode'?'role':entryStep==='challenges'?'mode':entryStep==='challenge-pin'?'challenges':'role');
 async function loadCloudActivities(){
@@ -470,6 +492,7 @@ function nextQuestion(){closeLongQuestion(true);if(!state)return;if(state.index>
  if(!state)return;
  const online=state.online;
  if(!confirm(online?'¿Abandonar el desafío? Este intento ya fue consumido.':'¿Salir de la partida? El progreso actual no se guardará.'))return;
+ clearOnlineWait();
  clearInterval(tick);
  clearInterval(pauseBudgetTick);
  pauseBudgetTick=null;
