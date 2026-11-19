@@ -21,6 +21,12 @@ button:focus-visible,select:focus-visible{outline:3px solid #80ffe2}
 .bomb:enabled{border-color:#f5bf6d}
 #status{min-height:2.8em;margin-bottom:0}
 #scoreboard{color:#a7f8e4}
+.bomb.bonusDim{opacity:.28;transition:opacity .35s}
+.bomb.bonusChosen{z-index:2;border-color:#ffdc7b;animation:bonusReveal .75s ease-out both}
+.bomb.bonusChosen b{display:inline-block;animation:bonusLabel .55s ease-out both}
+@keyframes bonusReveal{0%{box-shadow:0 0 0 0 #ffd66b}45%{box-shadow:0 0 24px 12px #ffbf4c66}100%{box-shadow:0 0 14px 3px #ffdf8177}}
+@keyframes bonusLabel{from{opacity:0;transform:scale(.55)}to{opacity:1;transform:scale(1)}}
+@media(prefers-reduced-motion:reduce){.bomb.bonusDim{transition:none}.bomb.bonusChosen,.bomb.bonusChosen b{animation:none}}
 </style>
 <main>
 <h1>💣 Ronda bonus</h1>
@@ -42,7 +48,7 @@ const arena=element('arena');
 const controls=['level','items','bonus'].map(element);
 const bombCount=9,columns=3,revealTimes=[5,4.5,4,3.5],shuffleTimes=[5,8,10,12],shufflePowers=[4,5,7,8];
 const clock='clock',hand='hand',heart='heart';
-let level=-1,itemsEnabled=false,score=0,inventory={},phase='idle',elapsed=0,moveElapsed=0,shuffleStep=0,last=0,bombs=[];
+let level=-1,itemsEnabled=false,score=0,inventory={},phase='idle',elapsed=0,moveElapsed=0,lastPattern=-1,last=0,bombs=[];
 function shuffle(values){
  const copy=values.slice();
  for(let i=copy.length-1;i>0;i--){
@@ -78,21 +84,25 @@ function start(){
   button.innerHTML='<b aria-hidden="true"></b>';
   button.lastElementChild.textContent=label(reward);
   button.setAttribute('aria-label','Bomba '+(index+1));
-  button.onclick=()=>choose(reward);
+  button.onclick=()=>choose(reward,button);
   arena.appendChild(button);
   return {button,slot:index,from:index,to:index};
  });
  controls.forEach(control=>control.disabled=true);
  element('start').disabled=true;
- phase='reveal';elapsed=0;last=performance.now();shuffleStep=0;paint(1,0);
+ phase='reveal';elapsed=0;last=performance.now();lastPattern=-1;paint(1,0);
  show('Memoriza los premios.');
  requestAnimationFrame(frame);
 }
 function move(){
- const pattern=shuffleStep%4;
+ const patterns=[0,1,2,3].filter(value=>value!==lastPattern);
+ const pattern=patterns[Math.floor(Math.random()*patterns.length)];
+ const horizontal=Math.random()<.5?1:2;
+ const vertical=Math.random()<.5?1:2;
+ lastPattern=pattern;
  bombs.forEach(bomb=>{
   const slot=bomb.slot,row=Math.floor(slot/columns),column=slot%columns;
-  const nextRow=(row+1)%columns,nextColumn=(column+1)%columns;
+  const nextRow=(row+vertical)%columns,nextColumn=(column+horizontal)%columns;
   bomb.from=slot;
   if(pattern===0)bomb.to=row*columns+nextColumn;
   else if(pattern===1)bomb.to=nextRow*columns+column;
@@ -102,7 +112,6 @@ function move(){
    bomb.to=opposite===4?5:opposite===5?4:opposite;
   }
  });
- shuffleStep++;
  moveElapsed=0;
 }
 function paint(progress,drop){
@@ -120,7 +129,7 @@ function paint(progress,drop){
  });
 }
 function frame(now){
- if(phase==='idle')return;
+ if(phase==='idle'||phase==='result')return;
  const dt=Math.min(.05,(now-last)/1000);last=now;elapsed+=dt;
  if(phase==='reveal'&&elapsed>=revealTimes[level]){
   bombs.forEach(bomb=>bomb.button.lastElementChild.textContent='');
@@ -146,11 +155,25 @@ function frame(now){
  }
  requestAnimationFrame(frame);
 }
-function choose(reward){
+function choose(reward,button){
  if(phase!=='choose'&&phase!=='attack')return;
  if(typeof reward==='number')score=Math.max(0,score+reward);
  else inventory[reward]++;
- finish('Premio: '+label(reward));
+ phase='result';
+ bombs.forEach(bomb=>{
+  bomb.button.disabled=true;
+  if(bomb.button!==button)bomb.button.classList.add('bonusDim');
+ });
+ button.classList.add('bonusChosen');
+ button.lastElementChild.textContent=label(reward);
+ button.setAttribute('aria-label','Premio: '+label(reward));
+ show('Premio: '+label(reward));
+ updateScore();
+ setTimeout(()=>{
+  phase='idle';
+  controls.forEach(control=>control.disabled=false);
+  element('start').disabled=false;
+ },850);
 }
 function finish(message){
  phase='idle';arena.textContent='';show(message);updateScore();
