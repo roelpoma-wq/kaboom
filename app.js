@@ -61,7 +61,39 @@ else if(step==='challenges'){
  card.classList.remove('entry-enter');card.classList.add('entry-exit');
  entryTransition=setTimeout(()=>{draw();card.classList.remove('entry-exit');void card.offsetWidth;card.classList.add('entry-enter');entryTransition=null;},230);
 }
-async function kaboomRpc(fn,args){const r=await fetch(SB_URL+'/rest/v1/rpc/'+fn,{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY,'Content-Type':'application/json'},body:JSON.stringify(args)});const raw=await r.text();let data;try{data=raw?JSON.parse(raw):null}catch{data=raw}if(!r.ok)throw Error(data?.message||data?.error||('Supabase '+r.status));return data}
+async function kaboomRpc(fn,args,timeoutMs=0){
+ const controller=timeoutMs&&typeof AbortController==='function'?new AbortController():null;
+ const request=(async()=>{
+  const response=await fetch(SB_URL+'/rest/v1/rpc/'+fn,{
+   method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY,'Content-Type':'application/json'},
+   body:JSON.stringify(args),...(controller?{signal:controller.signal}:{})
+  });
+  const raw=await response.text();
+  let data;
+  try{data=raw?JSON.parse(raw):null}catch{data=raw}
+  if(!response.ok)throw Error(data?.message||data?.error||('Supabase '+response.status));
+  return data;
+ })();
+ if(!timeoutMs)return request;
+ let timer;
+ const timeout=new Promise((resolve,reject)=>{
+  timer=setTimeout(()=>{
+   reject(Error('La conexión tardó demasiado. Puedes reintentar en esta partida.'));
+   if(controller)controller.abort();
+  },timeoutMs);
+ });
+ try{return await Promise.race([request,timeout])}
+ finally{clearTimeout(timer)}
+}
+function copyListData(value){return JSON.parse(JSON.stringify(value))}
+function createActivityUuid(){
+ const bytes=crypto.getRandomValues(new Uint8Array(16));
+ bytes[6]=(bytes[6]&15)|64;
+ bytes[8]=(bytes[8]&63)|128;
+ const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+ return hex.slice(0,8)+'-'+hex.slice(8,12)+'-'+hex.slice(12,16)+'-'+hex.slice(16,20)+'-'+hex.slice(20);
+}
+
 document.querySelectorAll('[data-dashboard-tab]').forEach(b=>b.addEventListener('click',()=>tab(b.dataset.dashboardTab)));
 async function teacherChallengeRpc(fn,args={}){if(!teacherToken||currentRole!=='teacher')throw Error('Acceso docente requerido');const res=await fetch(SB_URL+'/rest/v1/rpc/'+fn,{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+teacherToken,'Content-Type':'application/json'},body:JSON.stringify(args)});const raw=await res.text();let value;try{value=JSON.parse(raw)}catch{value=raw}if(!res.ok)throw Error(value?.message||raw.slice(0,220));return value}
 let teacherResultsData=[];
@@ -70,7 +102,7 @@ function filteredTeacherResults(){
  return teacherResultsData.filter(r=>(!activity||r.activity_id===activity)&&(!challenge||r.challenge_id===challenge)&&(!level||String(r.dificultad)===level)&&(!player||String(r.jugador||'').toLocaleLowerCase().includes(player)))
 }
 function renderTeacherResults(){
- const data=filteredTeacherResults(),container=$('teacherResultsTable');container.replaceChildren();
+ const data=filteredTeacherResults(),container=$('teacherResultsTable');container.textContent='';
  $('teacherResultsStatus').textContent=data.length+' resultado(s) de '+teacherResultsData.length+' registrados.';
  if(!data.length){const empty=document.createElement('p');empty.textContent='No hay resultados con estos filtros.';container.append(empty);return}
  const table=document.createElement('table');table.style.width='100%';const head=document.createElement('thead'),header=document.createElement('tr');
@@ -86,7 +118,7 @@ async function loadTeacherResults(){
  teacherResultsData=data;
  const activitySel=$('teacherResultsActivity'),challengeSel=$('teacherResultsChallenge');
  const selectedActivity=activitySel.value,selectedChallenge=challengeSel.value;
- function fill(select,items,selected){select.replaceChildren();const all=document.createElement('option');all.value='';all.textContent='Todos';select.append(all);for(const [id,name] of items){if(!id)continue;const o=document.createElement('option');o.value=id;o.textContent=name||id;select.append(o)}select.value=selected}
+ function fill(select,items,selected){select.textContent='';const all=document.createElement('option');all.value='';all.textContent='Todos';select.append(all);for(const [id,name] of items){if(!id)continue;const o=document.createElement('option');o.value=id;o.textContent=name||id;select.append(o)}select.value=selected}
  fill(activitySel,[...new Map(data.map(r=>[r.activity_id,r.actividad])).entries()],selectedActivity);
  fill(challengeSel,[...new Map(data.map(r=>[r.challenge_id,r.desafio])).entries()],selectedChallenge);
  renderTeacherResults()
@@ -106,7 +138,7 @@ let teacherChallengeRenderRequest=0;
 async function loadTeacherChallenges(){
  const requestId=++teacherChallengeRenderRequest;
  const status=$('teacherChallengesStatus'),target=$('teacherChallengesList');if(!status||!target||!teacherToken)return;
- status.textContent='Cargando desafíos…';target.replaceChildren();
+ status.textContent='Cargando desafíos…';target.textContent='';
  try{const data=await teacherChallengeRpc('kaboom_teacher_challenges_with_limits');if(requestId!==teacherChallengeRenderRequest)return;if(!Array.isArray(data))throw Error('Respuesta inesperada del servidor');
  status.textContent=data.length+' desafío(s) registrado(s).';
  for(const c of data){
@@ -187,10 +219,11 @@ function syncOnlineClock(reply,requestedAt){
  // Give the server's acceptance window time to close before sending a no-answer timeout.
  state.answerCutoff=receivedAt+Math.max(0,remaining+state.answerGrace);
 }
-async function onlineNextQuestion(){closeLongQuestion(true);if(!onlineSession)return;const session=onlineSession;clearInterval(tick);lock=true;try{const requestedAt=performance.now();const q=await kaboomRpc('kaboom_get_question',{p_session_id:session.id,p_session_token:session.token});if(onlineSession!==session)return;if(q?.expired||q?.status==='abandoned'){showExpiredOnlineSession();return}if(q.finished){finishOnline(q);return}onlineQuestion=q;state.index=Number(q.question_number||1)-1;state.total=Number(q.question_total||state.total||1);state.lives=Number(q.lives??state.lives);state.score=Number(q.score??state.score);state.correct=Number(q.correct_count??state.correct);state.timeLimit=Number(q.seconds_per_question||levels[state.level].seconds);state.answerGrace=Math.max(0,Number(q.answer_grace_ms)||0);
+async function onlineNextQuestion(){closeLongQuestion(true);if(!onlineSession)return;const session=onlineSession;clearInterval(tick);lock=true;$('time').textContent='Cargando pregunta…';try{const requestedAt=performance.now();const q=await kaboomRpc('kaboom_get_question',{p_session_id:session.id,p_session_token:session.token},12000);if(onlineSession!==session)return;if(q?.expired||q?.status==='abandoned'){showExpiredOnlineSession();return}if(q?.finished===true){finishOnline(q);return}if(!q?.question_nonce||typeof q.question!=='string'||!Array.isArray(q.options)||!q.options.length||q.options.some(option=>typeof option!=='string'))throw Error('No se recibió la pregunta completa.');onlineQuestion=q;state.index=Number(q.question_number||1)-1;state.total=Number(q.question_total||state.total||1);state.lives=Number(q.lives??state.lives);state.score=Number(q.score??state.score);state.correct=Number(q.correct_count??state.correct);state.timeLimit=Number(q.seconds_per_question||levels[state.level].seconds);state.answerGrace=Math.max(0,Number(q.answer_grace_ms)||0);
 syncOnlineClock(q,requestedAt);
 renderGameQuestion(q.question,q.question_placement||'auto');$('answers').innerHTML='';const options=Array.isArray(q.options)?q.options:[];options.forEach((value,i)=>{const btn=document.createElement('button');btn.className='answer';btn.innerHTML='<span style="margin-right:7px;color:#ffd45c">'+('ABCD'[i]||'')+'.</span> '+showContent(value);btn.onclick=()=>onlineAnswer(value,btn);$('answers').append(btn)});hud();scheduleGameTextFit();lock=false;startClock()}catch(e){if(onlineSession!==session)return;if(isExpiredOnlineSession(e)){showExpiredOnlineSession();return}lock=true;clearInterval(tick);showOverlay('<h2>Problema de conexión</h2><p>'+esc(e.message)+'</p><button class="primary" id="retryOnline">Reintentar</button>');$('retryOnline').onclick=()=>{hideOverlay();onlineNextQuestion()}}}
-async function onlineAnswer(value,button){if(!onlineSession||!onlineQuestion||lock)return;const session=onlineSession;lock=true;clearInterval(tick);$('answers').querySelectorAll('button').forEach(b=>b.disabled=true);try{const r=await kaboomRpc('kaboom_submit_answer',{p_session_id:onlineSession.id,p_session_token:onlineSession.token,p_question_nonce:onlineQuestion.question_nonce,p_answer:value});if(onlineSession!==session)return;if(r?.expired||r?.status==='abandoned'){showExpiredOnlineSession();return}if(r.time_expired===true||(value===null&&r.correct!==true)){
+async function onlineAnswer(value,button){if(!onlineSession||!onlineQuestion||lock)return;const session=onlineSession;const question=onlineQuestion;lock=true;clearInterval(tick);$('time').textContent='Enviando respuesta…';$('answers').querySelectorAll('button').forEach(b=>b.disabled=true);try{const r=await kaboomRpc('kaboom_submit_answer',{p_session_id:session.id,p_session_token:session.token,p_question_nonce:question.question_nonce,p_answer:value},12000);if(onlineSession!==session)return;if(r?.expired||r?.status==='abandoned'){showExpiredOnlineSession();return}if(typeof r?.correct!=='boolean')throw Error('No se recibió la confirmación de la respuesta.');
+if(r.time_expired===true||(value===null&&r.correct!==true)){
  toast('⏱️ Tiempo agotado');
 }else if(r.correct===true){
  button?.classList.add('good');playEffect('correct');
@@ -198,7 +231,7 @@ async function onlineAnswer(value,button){if(!onlineSession||!onlineQuestion||lo
  if(points!=null)toast('+'+points+' puntos');
 }else{
  button?.classList.add('bad');explode();
-}state.score=Number(r.score??state.score);state.lives=Number(r.lives??state.lives);state.correct=Number(r.correct_count??state.correct);hud();await new Promise(resolve=>setTimeout(resolve,r.correct?550:750));if(onlineSession===session)await onlineNextQuestion()}catch(e){if(onlineSession!==session)return;if(isExpiredOnlineSession(e)){showExpiredOnlineSession();return}showOverlay('<h2>No se pudo registrar la respuesta</h2><p>'+esc(e.message)+'</p><button class="primary" id="retryOnlineAnswer">Reintentar envío</button>');$('retryOnlineAnswer').onclick=()=>{hideOverlay();lock=false;onlineAnswer(value,button)}}}
+}state.score=Number(r.score??state.score);state.lives=Number(r.lives??state.lives);state.correct=Number(r.correct_count??state.correct);hud();await new Promise(resolve=>setTimeout(resolve,r.correct?550:750));if(onlineSession===session)await onlineNextQuestion()}catch(e){if(onlineSession!==session)return;if(isExpiredOnlineSession(e)){showExpiredOnlineSession();return}showOverlay('<h2>No se pudo registrar la respuesta</h2><p>'+esc(e.message)+'</p><button class="primary" id="retryOnlineAnswer">Reintentar envío</button>');$('retryOnlineAnswer').onclick=()=>{if(onlineSession!==session||onlineQuestion!==question)return;hideOverlay();lock=false;onlineAnswer(value,button)}}}
 function finishOnline(q){clearInterval(tick);lock=true;const s=state,session=onlineSession;onlineSession=null;onlineQuestion=null;state=null;const correct=Number(q.correct_count??s.correct),total=Number(q.question_total??s.total),base=Number(q.score??s.score),mult=braveryMultipliers[s.level]||1,final=Math.round(base*mult),grade=gradeFor(total?correct/total*100:0,s.level);$('game').classList.add('hidden');$('setup').classList.remove('hidden');$('pause').disabled=false;showOverlay('<div class="muted">🏆 DESAFÍO ONLINE FINALIZADO</div><div class="grade grade-'+grade.replace('+','plus')+'">'+esc(grade)+'</div><h2>'+esc(session.player)+'</h2><p>🎯 '+correct+'/'+total+' aciertos</p><p>⭐ Puntos originales: '+base+'</p><p>⚡ Bonus por Valentía: ×'+mult+'</p><div class="braveryTotal" style="align-items:center;margin:12px auto"><small>🏅 TOTAL FINAL</small><span>'+final+' PUNTOS</span></div><p class="muted">El resultado se registra en Supabase al finalizar la partida.</p><button class="primary" id="onlineAgain">Volver a desafíos</button>');$('onlineAgain').onclick=()=>{hideOverlay();showEntry('challenges',true)}}
 function enterStudentGame(){closeEntry();refreshSelects();$('changeMode').classList.remove('hidden');document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('hidden',!['play','ranking'].includes(b.dataset.tab)));tab('play');if(activeMode==='free')refreshOnlineFreeLists()}
 $('entryBack').onclick=()=>showEntry(entryStep==='teacher'||entryStep==='mode'?'role':entryStep==='challenges'?'mode':entryStep==='challenge-pin'?'challenges':'role');
@@ -318,7 +351,7 @@ function renderGameQuestion(content,preference='auto'){
   internal.textContent='';
   internal.style.fontSize='';
  }else{
-  external.replaceChildren();
+  external.textContent='';
   internal.innerHTML=showContent(content);
   internal.style.fontSize='';
  }
@@ -447,7 +480,7 @@ async function updatePublishedList(list,activityId,seconds){
 async function publishListOnline(list,button){
  if(currentRole!=='teacher'||!teacherToken){alert('Inicia sesión como profesor para publicar.');return}
  if(!Array.isArray(list.items)||list.items.length<4){alert('La lista necesita al menos 4 preguntas.');return}
- const mapping=getPublishedActivityIds(), existing=mapping[list.id], cloudId=existing||crypto.randomUUID();
+ const mapping=getPublishedActivityIds(), existing=mapping[list.id], cloudId=existing||createActivityUuid();
  const body={id:cloudId,title:list.title,subject:list.subject||'',items:list.items,published:true,visibility:'both',difficulty_config:activityDifficultyConfig(list,getActivitySeconds(list))};
  const original=button.textContent;button.disabled=true;button.textContent='☁️ Publicando…';
  try{
@@ -501,20 +534,20 @@ async function refreshCloudLists(){
  const questionPanel=document.createElement('div');questionPanel.className='cloudQuestionsModal hidden';questionPanel.setAttribute('role','dialog');questionPanel.setAttribute('aria-modal','true');document.body.append(questionPanel);const closeQuestions=()=>{questionPanel.classList.add('hidden');document.body.classList.remove('cloudQuestionsOpen')};
  editQuestions.onclick=async()=>{
   if(!questionPanel.classList.contains('hidden')){closeQuestions();return}
-  questionPanel.classList.remove('hidden');document.body.classList.add('cloudQuestionsOpen');questionPanel.replaceChildren();const loading=document.createElement('p');loading.textContent='Cargando preguntas de Supabase…';questionPanel.append(loading);
+  questionPanel.classList.remove('hidden');document.body.classList.add('cloudQuestionsOpen');questionPanel.textContent='';const loading=document.createElement('p');loading.textContent='Cargando preguntas de Supabase…';questionPanel.append(loading);
   try{
    const res=await fetch(SB_URL+'/rest/v1/kaboom_activities?id=eq.'+encodeURIComponent(activity.id)+'&select=id,title,subject,items',{headers:{apikey:SB_KEY,Authorization:'Bearer '+teacherToken}});
    if(!res.ok)throw Error('Supabase '+res.status);const rows=await res.json();if(rows.length!==1||!Array.isArray(rows[0].items))throw Error('No se pudieron leer las preguntas.');
-   let items=structuredClone(rows[0].items);
+   let items=copyListData(rows[0].items);
    const original=JSON.stringify(items);
-   questionPanel.replaceChildren();
+   questionPanel.textContent='';
    const header=document.createElement('div');header.className='cloudQuestionsHeader';const title=document.createElement('h2');title.textContent='✏️ '+activity.title;const close=document.createElement('button');close.textContent='✕ Cerrar';close.onclick=closeQuestions;header.append(title,close);questionPanel.append(header);
    const hint=document.createElement('p');hint.className='muted';hint.textContent='Editas la actividad original. Las partidas activas bloquean el guardado; los desafíos existentes conservan su rango. No cambies el orden de preguntas usadas en desafíos históricos sin revisar sus efectos.';questionPanel.append(hint);
    const rowsContainer=document.createElement('div');rowsContainer.className='cloudQuestionsRows';questionPanel.append(rowsContainer);
    const actions=document.createElement('div');actions.className='row';const add=document.createElement('button');add.type='button';add.textContent='+ Agregar pregunta';const saveQuestions=document.createElement('button');saveQuestions.type='button';saveQuestions.className='primary';saveQuestions.textContent='💾 Guardar preguntas en Supabase';const cancel=document.createElement('button');cancel.type='button';cancel.textContent='Cancelar';actions.append(add,saveQuestions,cancel);questionPanel.append(actions);
    const result=document.createElement('p');result.className='muted';result.setAttribute('role','status');questionPanel.append(result);
    function renderQuestionRows(){
-    rowsContainer.replaceChildren();
+    rowsContainer.textContent='';
     items.forEach((item,i)=>{
      const wrap=document.createElement('div');wrap.className='editorRow';const number=document.createElement('strong');number.textContent='Pregunta '+(i+1);wrap.append(number);
      for(const [key,label] of [['q','Pregunta'],['a','Respuesta correcta']]){
@@ -549,8 +582,8 @@ async function refreshCloudLists(){
    const response=await fetch(SB_URL+'/rest/v1/kaboom_activities?id=eq.'+encodeURIComponent(activity.id)+'&select=id,title,subject,items,difficulty_config',{headers:{apikey:SB_KEY,Authorization:'Bearer '+teacherToken}});
    if(!response.ok)throw Error('Supabase '+response.status);
    const data=await response.json();if(data.length!==1||!Array.isArray(data[0].items))throw Error('No se encontró la actividad o sus preguntas.');
-   const original=data[0];const local={id:'import-'+crypto.randomUUID(),title:original.title,subject:original.subject||'',items:structuredClone(original.items)};
-   if(original.difficulty_config&&typeof original.difficulty_config==='object')local.difficulty_config=structuredClone(original.difficulty_config);
+   const original=data[0];const local={id:'import-'+createActivityUuid(),title:original.title,subject:original.subject||'',items:copyListData(original.items)};
+   if(original.difficulty_config&&typeof original.difficulty_config==='object')local.difficulty_config=copyListData(original.difficulty_config);
    if(!persist(key,[...lists,local]))throw Error('No se pudo guardar la copia local.');
    lists.push(local);renderLists();note.textContent='✓ Copia independiente guardada en Mis listas de este navegador.';alert('Actividad copiada a Mis listas: '+local.title+'\\nLa copia es local e independiente de Supabase.');
   }catch(e){note.textContent='Error al copiar: '+e.message}finally{copy.disabled=false}
@@ -607,7 +640,7 @@ async function syncTeacherLists(){
  if(teacherListSyncBusy)return;teacherListSyncBusy=true;status.textContent='Sincronizando…';
  try{
   // Respaldo local antes de cualquier combinación. Nunca borramos listas locales.
-  const localSnapshot=structuredClone(lists);
+  const localSnapshot=copyListData(lists);
   const cloud=(await teacherListsRequest('?select=id,title,subject,items,difficulty_config,updated_at&order=updated_at.desc'))||[];
   const deletedResponse=await fetch(SB_URL+'/rest/v1/kaboom_teacher_list_deletions?select=id',{headers:{apikey:SB_KEY,Authorization:'Bearer '+teacherToken}});
   if(!deletedResponse.ok)throw Error('No se pudo verificar las listas eliminadas');
@@ -626,7 +659,7 @@ async function syncTeacherLists(){
 }
 $('syncTeacherLists').onclick=syncTeacherLists;
 $('backupTeacherLists').onclick=()=>download('kaboom-mis-listas-respaldo.json',JSON.stringify({format:'kaboom-lists-backup-v1',lists},null,2));
-function renderLists(){$('listCards').innerHTML=lists.map(l=>`<div class="listCard"><h3>${esc(l.title)}</h3><p class="muted">${esc(l.subject||'Sin asignatura')} · ${l.items.length} parejas</p><div class="row"><button class="small primary" data-act="publish" data-id="${esc(l.id)}">${getPublishedActivityIds()[l.id]?'☁️ Actualizar online':'☁️ Publicar online'}</button><button class="small" data-act="difficulty" data-id="${esc(l.id)}">⚙️ Niveles</button><button class="small" data-act="edit" data-id="${esc(l.id)}">Editar</button><button class="small" data-act="dup" data-id="${esc(l.id)}">Duplicar</button><button class="small" data-act="export" data-id="${esc(l.id)}">Exportar</button><button class="small danger" data-act="delete" data-id="${esc(l.id)}">Eliminar</button></div></div>`).join('');$('listCards').querySelectorAll('button').forEach(b=>b.onclick=async()=>{let l=lists.find(x=>x.id===b.dataset.id);if(!l)return;switch(b.dataset.act){case'publish':publishListOnline(l,b);break;case'difficulty':configureListDifficulty(l);break;case'edit':openEditor(l);break;case'dup':lists.push({...structuredClone(l),id:uid(),title:l.title+' (copia)'});persist(key,lists);refreshSelects();renderLists();break;case'export':download(l.title+'.json',JSON.stringify({format:'kaboom-list-v1',list:l},null,2));break;case'delete':if(confirm('¿Eliminar esta lista de tu biblioteca? No se borrarán actividades online ni resultados.')){if(teacherToken&&currentRole==='teacher'){try{await teacherListDelete(l)}catch(e){alert('No se eliminó la lista: '+e.message);break}}lists=lists.filter(x=>x.id!==l.id);persist(key,lists);refreshSelects();renderLists()}break}})}function uid(){return 'l_'+Date.now().toString(36)+Math.random().toString(36).slice(2,7)}let listEditorOpener=null;
+function renderLists(){$('listCards').innerHTML=lists.map(l=>`<div class="listCard"><h3>${esc(l.title)}</h3><p class="muted">${esc(l.subject||'Sin asignatura')} · ${l.items.length} parejas</p><div class="row"><button class="small primary" data-act="publish" data-id="${esc(l.id)}">${getPublishedActivityIds()[l.id]?'☁️ Actualizar online':'☁️ Publicar online'}</button><button class="small" data-act="difficulty" data-id="${esc(l.id)}">⚙️ Niveles</button><button class="small" data-act="edit" data-id="${esc(l.id)}">Editar</button><button class="small" data-act="dup" data-id="${esc(l.id)}">Duplicar</button><button class="small" data-act="export" data-id="${esc(l.id)}">Exportar</button><button class="small danger" data-act="delete" data-id="${esc(l.id)}">Eliminar</button></div></div>`).join('');$('listCards').querySelectorAll('button').forEach(b=>b.onclick=async()=>{let l=lists.find(x=>x.id===b.dataset.id);if(!l)return;switch(b.dataset.act){case'publish':publishListOnline(l,b);break;case'difficulty':configureListDifficulty(l);break;case'edit':openEditor(l);break;case'dup':lists.push({...copyListData(l),id:uid(),title:l.title+' (copia)'});persist(key,lists);refreshSelects();renderLists();break;case'export':download(l.title+'.json',JSON.stringify({format:'kaboom-list-v1',list:l},null,2));break;case'delete':if(confirm('¿Eliminar esta lista de tu biblioteca? No se borrarán actividades online ni resultados.')){if(teacherToken&&currentRole==='teacher'){try{await teacherListDelete(l)}catch(e){alert('No se eliminó la lista: '+e.message);break}}lists=lists.filter(x=>x.id!==l.id);persist(key,lists);refreshSelects();renderLists()}break}})}function uid(){return 'l_'+Date.now().toString(36)+Math.random().toString(36).slice(2,7)}let listEditorOpener=null;
 function openEditor(list){
  const editor=$('listEditor');
  listEditorOpener=document.activeElement;
