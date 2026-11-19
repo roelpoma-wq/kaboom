@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KABOOM · Piloto de ronda bonus</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#11162c;color:#fcfafa;font:16px system-ui,sans-serif}
+main{max-width:620px;margin:24px auto;padding:16px}
+h1{margin:0 0 12px;color:#ffd962}
+.controls{display:flex;align-items:center;flex-wrap:wrap;gap:12px}
+button,select{font:inherit;color:inherit;background:#283660;border:1px solid #697cad;border-radius:12px;padding:10px}
+button:enabled{cursor:pointer}
+button:focus-visible,select:focus-visible{outline:3px solid #80ffe2}
+#arena{height:350px;position:relative;overflow:hidden;margin:14px 0;background:#182144;border-radius:16px}
+.bomb{width:82px;height:64px;padding:0;position:absolute;transform:translate(-50%,-50%);background:#34394d;border:2px solid #f5bf6d;color:#fff;touch-action:manipulation}
+.bomb:disabled{opacity:1}
+.bomb span{display:block;font-size:24px;line-height:1.15}
+.bomb b{font-size:14px;color:#ffe4a6}
+#status{min-height:2.8em;margin-bottom:0}
+#scoreboard{color:#a7f8e4}
+</style>
+<main>
+<h1>💣 Ronda bonus</h1>
+<div class="controls">
+<label>Nivel <select id="level"><option>Fácil</option><option>Medio</option><option>Difícil</option><option>Máximo</option></select></label>
+<label><input id="items" type="checkbox" checked> Ítems</label>
+<label><input id="bonus" type="checkbox" checked> Ronda bonus</label>
+<button id="start">Probar ronda</button>
+</div>
+<p id="status" role="status">Selecciona la dificultad y prueba la ronda.</p>
+<div id="arena" aria-label="Bombas de la ronda bonus"></div>
+<p id="scoreboard"></p>
+</main>
+<script>
+(function(){
+'use strict';
+const element=id=>document.getElementById(id);
+const arena=element('arena');
+const controls=['level','items','bonus'].map(element);
+const counts=[4,6,9,9],revealTimes=[5,4.5,4,3.5],shuffleTimes=[5,8,10,12],powers=[4,5,7,8];
+const clock='clock',hand='hand';
+let level=-1,itemsEnabled=false,score=0,inventory={},phase='idle',elapsed=0,moveElapsed=0,step=0,last=0,bombs=[];
+function shuffle(values){
+ const copy=values.slice();
+ for(let i=copy.length-1;i>0;i--){
+  const j=Math.floor(Math.random()*(i+1));
+  const value=copy[i];copy[i]=copy[j];copy[j]=value;
+ }
+ return copy;
+}
+function label(value){
+ return value===clock?'⏱ +1':value===hand?'✋ +1':(value>0?'+':'')+value;
+}
+function show(message){element('status').textContent=message}
+function updateScore(){
+ element('scoreboard').textContent='Puntos: '+score+(itemsEnabled?' · ⏱ '+inventory.clock+' · ✋ '+inventory.hand:'');
+}
+function start(){
+ const next=element('level').selectedIndex,nextItems=element('items').checked;
+ if(next!==level||nextItems!==itemsEnabled){
+  level=next;itemsEnabled=nextItems;score=0;
+  inventory={clock:itemsEnabled?Math.ceil((4-level)/2):0,hand:itemsEnabled?Math.floor((4-level)/2):0};
+ }
+ updateScore();arena.textContent='';
+ if(!element('bonus').checked){show('Ronda bonus desactivada.');return}
+ const total=counts[level],columns=total===4?2:3;
+ const pool=[50,100,-100,-200,50,100,-100,-200,50];
+ if(itemsEnabled)pool.push(clock,hand,clock,hand);
+ const rewards=shuffle(pool).slice(0,total);
+ if(!rewards.some(value=>value>0))rewards[0]=100;
+ bombs=rewards.map((reward,index)=>{
+  const button=document.createElement('button');
+  button.type='button';button.className='bomb';button.disabled=true;
+  button.innerHTML='<span aria-hidden="true">💣</span><b></b>';
+  button.lastElementChild.textContent=label(reward);
+  button.setAttribute('aria-label','Bomba '+(index+1));
+  button.onclick=()=>choose(reward);
+  arena.appendChild(button);
+  return {button,slot:index,from:index,to:index};
+ });
+ controls.forEach(control=>control.disabled=true);
+ element('start').disabled=true;
+ phase='reveal';elapsed=0;last=performance.now();step=0;paint(1,0);
+ show('Memoriza los premios.');
+ requestAnimationFrame(frame);
+}
+function destination(slot,pattern,columns,rows,total){
+ const row=Math.floor(slot/columns),column=slot%columns;
+ if(pattern===0)return row*columns+(column+1)%columns;
+ if(pattern===1)return ((row+1)%rows)*columns+column;
+ if(pattern===2)return ((row+1)%rows)*columns+(column+1)%columns;
+ const center=Math.floor(total/2),neighbor=center+1,target=total-1-slot;
+ return total%2===0?target:target===center?neighbor:target===neighbor?center:target;
+}
+function move(){
+ const total=bombs.length,columns=total===4?2:3,rows=total/columns;
+ bombs.forEach(bomb=>{
+  bomb.from=bomb.slot;
+  bomb.to=destination(bomb.slot,step%4,columns,rows,total);
+ });
+ step++;
+ moveElapsed=0;
+}
+function paint(progress,drop){
+ const columns=bombs.length===4?2:3;
+ const gap=Math.min(112,(arena.clientWidth-16)/columns);
+ const left=arena.clientWidth/2-(columns-1)*gap/2;
+ const eased=progress*progress*(3-2*progress);
+ bombs.forEach(bomb=>{
+  const x=left+((bomb.from%columns)*(1-eased)+(bomb.to%columns)*eased)*gap;
+  const y=65+(Math.floor(bomb.from/columns)*(1-eased)+Math.floor(bomb.to/columns)*eased)*74;
+  bomb.button.style.left=x+'px';
+  bomb.button.style.top=(y+drop*(arena.clientHeight-y-32))+'px';
+ });
+}
+function frame(now){
+ if(phase==='idle')return;
+ const dt=Math.min(.05,(now-last)/1000);last=now;elapsed+=dt;
+ if(phase==='reveal'&&elapsed>=revealTimes[level]){
+  bombs.forEach(bomb=>bomb.button.lastElementChild.textContent='');
+  phase='shuffle';elapsed=0;move();show('Sigue la bomba que elegiste.');
+ }else if(phase==='shuffle'){
+  const progress=Math.min(1,elapsed/shuffleTimes[level]);
+  const duration=Math.max(.64-(powers[level]-1)*(.41/9),1.22-progress*(level>=2?1.06:.91)-level*.035);
+  moveElapsed+=dt/duration;paint(Math.min(1,moveElapsed),0);
+  if(moveElapsed>=1){
+   bombs.forEach(bomb=>bomb.slot=bomb.to);
+   if(elapsed>=shuffleTimes[level]){
+    phase='choose';elapsed=0;show('Elige tu bomba · 5 s');
+    bombs.forEach(bomb=>bomb.button.disabled=false);
+   }else move();
+  }
+ }else if(phase==='choose'){
+  if(elapsed>=5){phase='attack';elapsed=0;show('¡Las bombas se acercan!')}
+  else show('Elige tu bomba · '+Math.ceil(5-elapsed)+' s');
+ }else if(phase==='attack'){
+  paint(1,Math.min(1,elapsed/3.5));
+  if(elapsed>=3.5){finish('Tiempo agotado.');return}
+ }
+ requestAnimationFrame(frame);
+}
+function choose(reward){
+ if(phase!=='choose'&&phase!=='attack')return;
+ if(typeof reward==='number')score=Math.max(0,score+reward);
+ else inventory[reward]++;
+ finish('Premio: '+label(reward));
+}
+function finish(message){
+ phase='idle';arena.textContent='';show(message);updateScore();
+ controls.forEach(control=>control.disabled=false);
+ element('start').disabled=false;
+}
+element('start').onclick=start;
+})();
+</script>
+</html>
