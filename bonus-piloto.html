@@ -13,39 +13,44 @@ button,select{font:inherit;color:inherit;background:#283660;border:1px solid #69
 button:enabled{cursor:pointer}
 button:focus-visible,select:focus-visible{outline:3px solid #80ffe2}
 #arena{height:350px;position:relative;overflow:hidden;margin:14px 0;background:#182144;border-radius:16px}
-.bomb{width:58px;height:58px;padding:0;position:absolute;top:0;left:0;border-radius:50%;background:radial-gradient(circle at 34% 27%,#555d7b,#252b43 55%,#111626);border:2px solid #8290bd;color:#fff;touch-action:manipulation}
-.bomb::before{content:'';position:absolute;left:33px;top:-12px;width:13px;height:15px;border:3px solid #e1a66c;border-left:0;border-bottom:0;border-radius:0 12px 0 0;transform:rotate(-25deg)}
-.bomb::after{content:'';position:absolute;left:44px;top:-11px;width:6px;height:6px;border-radius:50%;background:#ffce6a}
-.bomb:disabled{opacity:1}
-.bomb b{font-size:15px;color:#ffe4a6;position:relative}
-.bomb:enabled{border-color:#f5bf6d}
+.card{width:58px;height:68px;padding:0;position:absolute;top:0;left:0;background:transparent;border:0;perspective:650px;touch-action:manipulation}
+.card:disabled{opacity:1}
+.cardInner{position:relative;display:block;width:100%;height:100%;transform-style:preserve-3d;transition:transform .42s cubic-bezier(.22,.8,.35,1)}
+.cardFace{position:absolute;inset:0;top:0;right:0;bottom:0;left:0;display:grid;place-items:center;border:2px solid #8196dd;border-radius:12px;backface-visibility:hidden}
+.cardFront{background:linear-gradient(155deg,#294884,#241739);color:#ffe5a7;font-weight:900}
+.cardBack{background:repeating-linear-gradient(135deg,#202c53 0 7px,#283967 7px 14px);color:#c2d5ff;transform:rotateY(180deg)}
+.cardBack span{display:grid;place-items:center;border:1px solid #869ee0;border-radius:8px;width:100%;height:100%}
+.card.flipped .cardInner{transform:rotateY(180deg)}
+.card:enabled .cardFace{border-color:#ffd76d}
+.card.arriving .cardInner{animation:cardArrival .42s ease-out both;animation-delay:var(--deal-delay)}
+@keyframes cardArrival{from{opacity:0;transform:translateY(12px) scale(.89)}to{opacity:1;transform:none}}
 #status{min-height:2.8em;margin-bottom:0}
 #scoreboard{color:#a7f8e4}
-.bomb.bonusDim{opacity:.28;transition:opacity .35s}
-.bomb.bonusChosen{z-index:2;border-color:#ffdc7b;animation:bonusReveal .75s ease-out both}
-.bomb.bonusChosen b{display:inline-block;animation:bonusLabel .55s ease-out both}
+.card.bonusDim{opacity:.28;transition:opacity .35s}
+.card.bonusChosen{z-index:2;border-color:#ffdc7b;animation:bonusReveal .75s ease-out both}
+.card.bonusChosen .cardFront{display:inline-block;animation:bonusLabel .55s ease-out both}
 @keyframes bonusReveal{0%{box-shadow:0 0 0 0 #ffd66b}45%{box-shadow:0 0 24px 12px #ffbf4c66}100%{box-shadow:0 0 14px 3px #ffdf8177}}
 @keyframes bonusLabel{from{opacity:0;transform:scale(.55)}to{opacity:1;transform:scale(1)}}
-@media(prefers-reduced-motion:reduce){.bomb.bonusDim{transition:none}.bomb.bonusChosen,.bomb.bonusChosen b{animation:none}}
+@media(prefers-reduced-motion:reduce){.card.bonusDim{transition:none}.card.bonusChosen,.card.bonusChosen .cardFront{animation:none}}
 #chooseCountdown{min-height:1.5em;color:#ffe78b;font-weight:900;letter-spacing:.08em;text-align:center}
-.bomb.bonusBlast{animation:bonusBlast .65s ease-out both;background:#ffb83c;border-color:#fff3ac}
+.card.bonusBlast{animation:bonusBlast .65s ease-out both}.card.bonusBlast .cardFace{background:#ffb83c;border-color:#fff3ac}
 @keyframes bonusBlast{0%{opacity:1;box-shadow:0 0 0 0 #ffdb67}35%{opacity:1;box-shadow:0 0 24px 22px #ff773caa}100%{opacity:0;box-shadow:0 0 40px 42px #ff773c00}}
-@media(prefers-reduced-motion:reduce){.bomb.bonusBlast{animation:none;opacity:.35}}
+@media(prefers-reduced-motion:reduce){.card.bonusBlast{animation:none;opacity:.35}}
 body.embedded main{margin:0;padding:6px}
 body.embedded h1,body.embedded .controls,body.embedded #scoreboard{display:none}
-body.embedded #arena{height:clamp(240px,calc(100vh - 72px),350px);margin:0}
+body.embedded #arena{height:240px;height:clamp(230px,calc(100vh - 68px),350px);margin:0;background:#192344}
 body.embedded #status{margin:0;min-height:2.4em}
+@media(prefers-reduced-motion:reduce){.cardInner{transition:none}.card.arriving .cardInner{animation:none}}
 </style>
 <main>
-<h1>💣 Ronda bonus</h1>
+<h1>🃏 Ronda bonus</h1>
 <div class="controls">
 <label>Nivel <select id="level"><option>Fácil</option><option>Medio</option><option>Difícil</option><option>Máximo</option></select></label>
-<label><input id="items" type="checkbox" checked> Ítems</label>
-<label><input id="bonus" type="checkbox" checked> Ronda bonus</label>
+
 <button id="start">Probar ronda</button>
 </div>
 <div id="chooseCountdown" aria-hidden="true"></div><p id="status" role="status">Selecciona la dificultad y prueba la ronda.</p>
-<div id="arena" aria-label="Bombas de la ronda bonus"></div>
+<div id="arena" aria-label="Cartas de la ronda bonus"></div>
 <p id="scoreboard"></p>
 </main>
 <script>
@@ -58,7 +63,8 @@ const embedded=config.get('embedded')==='1'&&window.parent!==window;
 function reportReward(reward){
  if(embedded)window.parent.postMessage({type:'kaboom-bonus-complete',reward},location.origin);
 }
-const controls=['level','items','bonus'].map(element);
+const controls=[element('level')];
+const maximumSpeed=config.get('fast')==='1';
 const bombCount=9,columns=3,revealTimes=[5,4.5,4,3.5],shuffleTimes=[5,8,10,12],shufflePowers=[4,5,7,8];
 const clock='clock',hand='hand',heart='heart';
 let level=-1,itemsEnabled=false,score=0,inventory={},phase='idle',elapsed=0,moveElapsed=0,previousMoves=[],last=0,bombs=[];
@@ -78,13 +84,12 @@ function updateScore(){
  element('scoreboard').textContent='Puntos: '+score+(itemsEnabled?' · ⏱ '+inventory.clock+' · ✋ '+inventory.hand+' · ❤️ '+inventory.heart:'');
 }
 function start(){
- const next=element('level').selectedIndex,nextItems=element('items').checked;
+ const next=element('level').selectedIndex,nextItems=!embedded||config.get('items')==='1';
  if(next!==level||nextItems!==itemsEnabled){
   level=next;itemsEnabled=nextItems;score=0;
   inventory={clock:itemsEnabled?Math.ceil((4-level)/2):0,hand:itemsEnabled?Math.floor((4-level)/2):0,heart:0};
  }
  updateScore();arena.textContent='';element('chooseCountdown').textContent='';
- if(!element('bonus').checked){show('Ronda bonus desactivada.');return}
  const total=bombCount;
  const pointPool=[50,100,200,-100,-200,50,100,200,-100];
  const itemRewards=itemsEnabled?shuffle([clock,hand,heart]).slice(0,2):[];
@@ -93,17 +98,18 @@ function start(){
  const rewards=shuffle(points.concat(itemRewards));
  bombs=rewards.map((reward,index)=>{
   const button=document.createElement('button');
-  button.type='button';button.className='bomb';button.disabled=true;
-  button.innerHTML='<b aria-hidden="true"></b>';
-  button.lastElementChild.textContent=label(reward);
-  button.setAttribute('aria-label','Bomba '+(index+1));
+  button.type='button';button.className='card arriving';button.disabled=true;
+  button.innerHTML='<span class="cardInner" aria-hidden="true"><b class="cardFace cardFront"></b><span class="cardFace cardBack"><span>✦</span></span></span>';
+  button.style.setProperty('--deal-delay',index*30+'ms');
+  button.querySelector('.cardFront').textContent=label(reward);
+  button.setAttribute('aria-label','Carta '+(index+1));
   button.onclick=()=>choose(reward,button);
   arena.appendChild(button);
   return {button,slot:index,from:index,to:index,bend:0};
  });
  controls.forEach(control=>control.disabled=true);
  element('start').disabled=true;
- phase='reveal';elapsed=0;last=performance.now();previousMoves=[];paint(1,0);
+ phase='deal';elapsed=0;last=performance.now();previousMoves=[];paint(1,0);
  show('Memoriza los premios.');
  requestAnimationFrame(frame);
 }
@@ -139,33 +145,38 @@ function paint(progress,drop){
   const arc=Math.sin(Math.PI*progress)*24*bomb.bend;
   const x=fromX+dx*eased-dy/distance*arc;
   const y=fromY+dy*eased+dx/distance*arc;
-  bomb.button.style.transform='translate3d('+(x-29)+'px,'+(y+drop*(arena.clientHeight-y-29)-29)+'px,0)';
+  bomb.button.style.transform='translate3d('+(x-29)+'px,'+(y+drop*(arena.clientHeight-y-34)-34)+'px,0)';
  });
 }
 function frame(now){
  if(phase==='idle'||phase==='result')return;
  const dt=Math.min(.05,(now-last)/1000);last=now;elapsed+=dt;
- if(phase==='reveal'&&elapsed>=revealTimes[level]){
-  bombs.forEach(bomb=>bomb.button.lastElementChild.textContent='');
-  phase='shuffle';elapsed=0;move();show('Sigue la bomba que elegiste.');
+ if(phase==='deal'&&elapsed>=.68){
+  bombs.forEach(card=>card.button.classList.remove('arriving'));
+  phase='reveal';elapsed=0;
+ }else if(phase==='reveal'&&elapsed>=revealTimes[level]){
+  bombs.forEach(card=>card.button.classList.add('flipped'));
+  phase='flip';elapsed=0;show('Volteando las cartas…');
+ }else if(phase==='flip'&&elapsed>=.44){
+  phase='shuffle';elapsed=0;move();show('Sigue la carta que elegiste.');
  }else if(phase==='shuffle'){
   const remaining=Math.ceil(shuffleTimes[level]-elapsed);
   const cue=remaining>=1&&remaining<=5?'CHOOSE IN '+remaining:'';
   if(element('chooseCountdown').textContent!==cue)element('chooseCountdown').textContent=cue;
   const progress=Math.min(1,elapsed/shuffleTimes[level]);
-  const duration=Math.max(.64-(shufflePowers[level]-1)*(.41/9),1.22-progress*(level>=2?1.06:.91)-level*.035);
+  const duration=Math.max(.64-(shufflePowers[level]-1)*(.41/9),1.22-progress*(level>=2?1.06:.91)-level*.035,maximumSpeed?0:.62);
   moveElapsed+=dt/duration;
   paint(Math.min(1,moveElapsed),0);
   if(moveElapsed>=1){
    bombs.forEach(bomb=>bomb.slot=bomb.to);
    if(elapsed>=shuffleTimes[level]){
-    phase='choose';elapsed=0;element('chooseCountdown').textContent='NOW!';show('Elige tu bomba · 5 s');
+    phase='choose';elapsed=0;element('chooseCountdown').textContent='NOW!';show('Elige tu carta · 5 s');
     bombs.forEach(bomb=>bomb.button.disabled=false);
    }else move();
   }
  }else if(phase==='choose'){
   if(elapsed>=5){explodeAll();return}
-  else{const message='Elige tu bomba · '+Math.ceil(5-elapsed)+' s';if(element('status').textContent!==message)show(message)}
+  else{const message='Elige tu carta · '+Math.ceil(5-elapsed)+' s';if(element('status').textContent!==message)show(message)}
  }
  requestAnimationFrame(frame);
 }
@@ -180,7 +191,7 @@ function choose(reward,button){
   if(bomb.button!==button)bomb.button.classList.add('bonusDim');
  });
  button.classList.add('bonusChosen');
- button.lastElementChild.textContent=label(reward);
+ button.classList.remove('flipped');
  button.setAttribute('aria-label','Premio: '+label(reward));
  show('Premio: '+label(reward));
  updateScore();
@@ -198,7 +209,7 @@ function explodeAll(){
   bomb.button.disabled=true;
   bomb.button.classList.add('bonusBlast');
  });
- show('¡Tiempo agotado! Explotaron las nueve bombas.');
+ show('¡Tiempo agotado! Se perdieron los nueve premios.');
  setTimeout(()=>{
   phase='idle';arena.textContent='';
   controls.forEach(control=>control.disabled=false);
@@ -210,7 +221,6 @@ element('start').onclick=start;
 if(embedded){
  document.body.classList.add('embedded');
  element('level').selectedIndex=Math.min(3,Math.max(0,Number(config.get('level'))||0));
- element('items').checked=config.get('items')==='1';
  setTimeout(start,700);
 }
 })();
