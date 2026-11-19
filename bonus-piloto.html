@@ -52,6 +52,7 @@ body.embedded #status{position:absolute;width:1px;height:1px;min-height:0;margin
 <div class="controls">
 <label>Nivel <select id="level"><option>Fácil</option><option>Medio</option><option>Difícil</option><option>Máximo</option></select></label>
 
+<label>Velocidad máxima <input id="previewSpeed" type="number" min="1" max="30" value="30"></label>
 <button id="start">Probar ronda</button>
 </div>
 <div id="chooseCountdown" aria-hidden="true"></div><p id="status" role="status">Selecciona la dificultad y prueba la ronda.</p>
@@ -68,11 +69,11 @@ const embedded=config.get('embedded')==='1'&&window.parent!==window;
 function reportReward(reward){
  if(embedded)window.parent.postMessage({type:'kaboom-bonus-complete',reward},location.origin);
 }
-const controls=[element('level')];
-const speed=Math.max(1,Math.min(20,Math.round(Number(config.get('speed'))||(config.get('fast')==='1'?20:10))));
-const bombCount=9,columns=3,revealTimes=[5,4.5,4,3.5],shuffleTimes=[5,8,10,12],shufflePowers=[4,5,7,8];
+const controls=[element('level'),element('previewSpeed')];
+const maxSpeed=Math.max(1,Math.min(30,Math.round(Number(config.get('speed'))||(config.get('fast')==='1'?30:10))));
+const bombCount=9,columns=3,revealTimes=[5,4.5,4,3.5],shuffleTimes=[5,8,10,12];
 const clock='clock',hand='hand',heart='heart';
-let level=-1,itemsEnabled=false,score=0,inventory={},phase='idle',elapsed=0,moveElapsed=0,previousMoves=[],last=0,bombs=[];
+let speed=1,level=-1,itemsEnabled=false,score=0,inventory={},phase='idle',elapsed=0,moveElapsed=0,previousMoves=[],last=0,bombs=[];
 function shuffle(values){
  const copy=values.slice();
  for(let i=copy.length-1;i>0;i--){
@@ -94,6 +95,8 @@ function start(){
   level=next;itemsEnabled=nextItems;score=0;
   inventory={clock:itemsEnabled?Math.ceil((4-level)/2):0,hand:itemsEnabled?Math.floor((4-level)/2):0,heart:0};
  }
+ const limit=embedded?maxSpeed:Math.max(1,Math.min(30,Number(element('previewSpeed').value)||30));
+ speed=Math.max(1,limit-(3-level)*5);
  updateScore();arena.textContent='';element('chooseCountdown').textContent='';
  const total=bombCount;
  const pointPool=[50,100,200,-100,-200,50,100,200,-100];
@@ -119,20 +122,25 @@ function start(){
  requestAnimationFrame(frame);
 }
 function move(){
- const slots=shuffle(Array.from({length:bombCount},(_,index)=>index));
- const next=Array.from({length:bombCount},(_,index)=>index);
- const groupSize=3+Math.floor(Math.random()*3);
- const group=slots.slice(0,groupSize);
- group.forEach((slot,index)=>{next[slot]=group[(index+1)%group.length]});
- const pair=slots.slice(groupSize,groupSize+2);
- if(Math.random()<.65&&previousMoves[pair[0]]!==pair[1]){
-  next[pair[0]]=pair[1];next[pair[1]]=pair[0];
+ const slots=Array.from({length:bombCount},(_,index)=>index);
+ let next;
+ for(let attempt=0;attempt<12;attempt++){
+  const active=shuffle(slots).slice(0,3+Math.floor(Math.random()*6));
+  next=slots.slice();
+  for(let i=0;i<active.length;){
+   const remaining=active.length-i;
+   const length=remaining<=3?remaining:2+Math.floor(Math.random()*(remaining===4?1:Math.min(4,remaining-3)));
+   const cycle=active.slice(i,i+length);
+   cycle.forEach((slot,index)=>{next[slot]=cycle[(index+1)%length]});
+   i+=length;
+  }
+  if(active.every(slot=>previousMoves[next[slot]]!==slot))break;
  }
  previousMoves=next;
  bombs.forEach(bomb=>{
   bomb.from=bomb.slot;
   bomb.to=next[bomb.slot];
-  bomb.bend=Math.random()<.5?1:-1;
+  bomb.bend=(Math.random()<.5?-1:1)*(.55+Math.random()*.45);
  });
  moveElapsed=0;
 }
@@ -175,7 +183,8 @@ function frame(now){
   const cue=remaining>=1&&remaining<=5?'CHOOSE IN '+remaining:'';
   if(element('chooseCountdown').textContent!==cue)element('chooseCountdown').textContent=cue;
   const progress=Math.min(1,elapsed/shuffleTimes[level]);
-  const duration=Math.max(.64-(shufflePowers[level]-1)*(.41/9),1.22-progress*(level>=2?1.06:.91)-level*.035,1.08-(speed-1)*.86/19);
+  const fastest=1.06*Math.pow(.11/1.06,(speed-1)/29);
+  const duration=fastest+(1.24-fastest)*Math.pow(1-progress,2);
   moveElapsed+=dt/duration;
   paint(Math.min(1,moveElapsed),0);
   if(moveElapsed>=1){
@@ -233,7 +242,13 @@ element('start').onclick=start;
 if(embedded){
  document.body.classList.add('embedded');
  element('level').selectedIndex=Math.min(3,Math.max(0,Number(config.get('level'))||0));
- setTimeout(start,700);
+ const onStart=event=>{
+  if(event.origin!==location.origin||event.source!==window.parent||event.data?.type!=='kaboom-bonus-start')return;
+  window.removeEventListener('message',onStart);
+  start();
+ };
+ window.addEventListener('message',onStart);
+ window.parent.postMessage({type:'kaboom-bonus-ready'},location.origin);
 }
 })();
 </script>
