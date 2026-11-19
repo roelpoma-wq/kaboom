@@ -31,6 +31,10 @@ button:focus-visible,select:focus-visible{outline:3px solid #80ffe2}
 .bomb.bonusBlast{animation:bonusBlast .65s ease-out both;background:#ffb83c;border-color:#fff3ac}
 @keyframes bonusBlast{0%{opacity:1;box-shadow:0 0 0 0 #ffdb67}35%{opacity:1;box-shadow:0 0 24px 22px #ff773caa}100%{opacity:0;box-shadow:0 0 40px 42px #ff773c00}}
 @media(prefers-reduced-motion:reduce){.bomb.bonusBlast{animation:none;opacity:.35}}
+body.embedded main{margin:0;padding:6px}
+body.embedded h1,body.embedded .controls,body.embedded #scoreboard{display:none}
+body.embedded #arena{height:clamp(240px,calc(100vh - 72px),350px);margin:0}
+body.embedded #status{margin:0;min-height:2.4em}
 </style>
 <main>
 <h1>💣 Ronda bonus</h1>
@@ -49,6 +53,11 @@ button:focus-visible,select:focus-visible{outline:3px solid #80ffe2}
 'use strict';
 const element=id=>document.getElementById(id);
 const arena=element('arena');
+const config=new URLSearchParams(location.search);
+const embedded=config.get('embedded')==='1'&&window.parent!==window;
+function reportReward(reward){
+ if(embedded)window.parent.postMessage({type:'kaboom-bonus-complete',reward},location.origin);
+}
 const controls=['level','items','bonus'].map(element);
 const bombCount=9,columns=3,revealTimes=[5,4.5,4,3.5],shuffleTimes=[5,8,10,12],shufflePowers=[4,5,7,8];
 const clock='clock',hand='hand',heart='heart';
@@ -122,9 +131,10 @@ function paint(progress,drop){
  const eased=progress*progress*(3-2*progress);
  bombs.forEach(bomb=>{
   const fromX=left+(bomb.from%columns)*gap;
-  const fromY=59+Math.floor(bomb.from/columns)*84;
+  const rowGap=Math.min(84,(arena.clientHeight-110)/2);
+ const fromY=55+Math.floor(bomb.from/columns)*rowGap;
   const dx=((bomb.to%columns)-(bomb.from%columns))*gap;
-  const dy=(Math.floor(bomb.to/columns)-Math.floor(bomb.from/columns))*84;
+  const dy=(Math.floor(bomb.to/columns)-Math.floor(bomb.from/columns))*rowGap;
   const distance=Math.sqrt(dx*dx+dy*dy)||1;
   const arc=Math.sin(Math.PI*progress)*24*bomb.bend;
   const x=fromX+dx*eased-dy/distance*arc;
@@ -178,6 +188,7 @@ function choose(reward,button){
   phase='idle';
   controls.forEach(control=>control.disabled=false);
   element('start').disabled=false;
+  reportReward(reward);
  },850);
 }
 function explodeAll(){
@@ -192,9 +203,16 @@ function explodeAll(){
   phase='idle';arena.textContent='';
   controls.forEach(control=>control.disabled=false);
   element('start').disabled=false;
+  reportReward(null);
  },650);
 }
 element('start').onclick=start;
+if(embedded){
+ document.body.classList.add('embedded');
+ element('level').selectedIndex=Math.min(3,Math.max(0,Number(config.get('level'))||0));
+ element('items').checked=config.get('items')==='1';
+ setTimeout(start,700);
+}
 })();
 </script>
 </html>
