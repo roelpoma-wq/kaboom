@@ -1,8 +1,9 @@
 (()=>{'use strict';const splash=document.getElementById('splash');document.getElementById('splashStart').addEventListener('click',()=>{splash.remove();document.body.classList.remove('splash-active');showEntry('role',true)},{once:true});const $=id=>document.getElementById(id);const lightModeKey='kaboom_light_mode';
-const androidVersion=Number((navigator.userAgent.match(/Android (\d+)/i)||[])[1]);
-let lightMode=Boolean(androidVersion&&(
- androidVersion<=9||navigator.deviceMemory<=2||/TB[-_ ]?X(?:505|605)[A-Z]*\b|Lenovo Tab M10/i.test(navigator.userAgent)
-));
+const memory=navigator.deviceMemory;
+const cores=navigator.hardwareConcurrency;
+let lightMode=/Android/i.test(navigator.userAgent)&&(
+ (memory>0&&memory<=1)||(memory>0&&memory<=2&&cores>0&&cores<=4)
+);
 try{
  const saved=localStorage.getItem(lightModeKey);
  if(saved!==null)lightMode=saved==='on';
