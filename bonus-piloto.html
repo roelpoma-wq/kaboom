@@ -40,9 +40,9 @@ button:focus-visible,select:focus-visible{outline:3px solid #80ffe2}
 const element=id=>document.getElementById(id);
 const arena=element('arena');
 const controls=['level','items','bonus'].map(element);
-const counts=[4,6,9,9],revealTimes=[5.5,5,4.5,4.5],shuffleTimes=[5,7,8.5,10],moveTimes=[1.24,1.17,1.10,1.04],fastMoveTimes=[.90,.77,.66,.56];
+const bombCount=9,columns=3,revealTimes=[5,4.5,4,3.5],shuffleTimes=[5,8,10,12],shufflePowers=[4,5,7,8];
 const clock='clock',hand='hand',heart='heart';
-let level=-1,itemsEnabled=false,score=0,inventory={},phase='idle',elapsed=0,moveElapsed=0,moveDuration=0,previousPattern=-1,last=0,bombs=[];
+let level=-1,itemsEnabled=false,score=0,inventory={},phase='idle',elapsed=0,moveElapsed=0,shuffleStep=0,last=0,bombs=[];
 function shuffle(values){
  const copy=values.slice();
  for(let i=copy.length-1;i>0;i--){
@@ -66,7 +66,7 @@ function start(){
  }
  updateScore();arena.textContent='';
  if(!element('bonus').checked){show('Ronda bonus desactivada.');return}
- const total=counts[level],columns=total===4?2:3;
+ const total=bombCount;
  const pointPool=[50,100,200,-100,-200,50,100,200,-100];
  const itemRewards=itemsEnabled?shuffle([clock,hand,heart]).slice(0,2):[];
  const points=shuffle(pointPool).slice(0,total-itemRewards.length);
@@ -84,44 +84,38 @@ function start(){
  });
  controls.forEach(control=>control.disabled=true);
  element('start').disabled=true;
- phase='reveal';elapsed=0;last=performance.now();previousPattern=-1;paint(1,0);
+ phase='reveal';elapsed=0;last=performance.now();shuffleStep=0;paint(1,0);
  show('Memoriza los premios.');
  requestAnimationFrame(frame);
 }
 function move(){
- const total=bombs.length,columns=total===4?2:3;
- const remaining=shuffleTimes[level]-elapsed;
- const progress=Math.min(1,elapsed/shuffleTimes[level]);
- const duration=moveTimes[level]+(fastMoveTimes[level]-moveTimes[level])*progress;
- if(remaining<duration){moveDuration=0;return}
- const pairs=[];
- for(let i=0;i<total;i++){
-  if(i%columns+1<columns)pairs.push([i,i+1]);
-  if(i+columns<total)pairs.push([i,i+columns]);
- }
- const candidates=pairs.filter((_,index)=>index!==previousPattern);
- const pair=candidates[Math.floor(Math.random()*candidates.length)];
- previousPattern=pairs.indexOf(pair);
+ const pattern=shuffleStep%4;
  bombs.forEach(bomb=>{
-  bomb.from=bomb.slot;
-  bomb.to=bomb.slot===pair[0]?pair[1]:bomb.slot===pair[1]?pair[0]:bomb.slot;
+  const slot=bomb.slot,row=Math.floor(slot/columns),column=slot%columns;
+  const nextRow=(row+1)%columns,nextColumn=(column+1)%columns;
+  bomb.from=slot;
+  if(pattern===0)bomb.to=row*columns+nextColumn;
+  else if(pattern===1)bomb.to=nextRow*columns+column;
+  else if(pattern===2)bomb.to=nextRow*columns+nextColumn;
+  else{
+   const opposite=bombCount-1-slot;
+   bomb.to=opposite===4?5:opposite===5?4:opposite;
+  }
  });
- moveDuration=duration;
+ shuffleStep++;
  moveElapsed=0;
 }
 function paint(progress,drop){
- const columns=bombs.length===4?2:3;
  const gap=Math.min(112,(arena.clientWidth-16)/columns);
  const left=arena.clientWidth/2-(columns-1)*gap/2;
  const eased=progress*progress*(3-2*progress);
- const arc=Math.sin(Math.PI*progress)*32;
  bombs.forEach(bomb=>{
   const fromX=left+(bomb.from%columns)*gap;
   const fromY=59+Math.floor(bomb.from/columns)*84;
   const dx=((bomb.to%columns)-(bomb.from%columns))*gap;
   const dy=(Math.floor(bomb.to/columns)-Math.floor(bomb.from/columns))*84;
-  const x=fromX+dx*eased-Math.sign(dy)*arc;
-  const y=fromY+dy*eased+Math.sign(dx)*arc;
+  const x=fromX+dx*eased;
+  const y=fromY+dy*eased;
   bomb.button.style.transform='translate3d('+(x-29)+'px,'+(y+drop*(arena.clientHeight-y-29)-29)+'px,0)';
  });
 }
@@ -132,17 +126,16 @@ function frame(now){
   bombs.forEach(bomb=>bomb.button.lastElementChild.textContent='');
   phase='shuffle';elapsed=0;move();show('Sigue la bomba que elegiste.');
  }else if(phase==='shuffle'){
-  if(moveDuration){
-   moveElapsed+=dt;
-   paint(Math.min(1,moveElapsed/moveDuration),0);
-   if(moveElapsed>=moveDuration){
-    bombs.forEach(bomb=>bomb.slot=bomb.to);
-    move();
-   }
-  }
-  if(elapsed>=shuffleTimes[level]){
-   phase='choose';elapsed=0;show('Elige tu bomba · 5 s');
-   bombs.forEach(bomb=>bomb.button.disabled=false);
+  const progress=Math.min(1,elapsed/shuffleTimes[level]);
+  const duration=Math.max(.64-(shufflePowers[level]-1)*(.41/9),1.22-progress*(level>=2?1.06:.91)-level*.035);
+  moveElapsed+=dt/duration;
+  paint(Math.min(1,moveElapsed),0);
+  if(moveElapsed>=1){
+   bombs.forEach(bomb=>bomb.slot=bomb.to);
+   if(elapsed>=shuffleTimes[level]){
+    phase='choose';elapsed=0;show('Elige tu bomba · 5 s');
+    bombs.forEach(bomb=>bomb.button.disabled=false);
+   }else move();
   }
  }else if(phase==='choose'){
   if(elapsed>=5){phase='attack';elapsed=0;show('¡Las bombas se acercan!')}
