@@ -358,7 +358,10 @@ body.kaboomPlaying header{padding-top:5px;padding-bottom:5px}
  #splash{overflow-y:auto;overflow-x:hidden}
  .splash-title{font-size:clamp(34px,min(13vw,18vh),125px)}
  #entryFlow .entryCard{max-height:calc(100vh - 24px);max-height:calc(100dvh - 24px)}
- #entryFlow .entryCard.entry-enter{animation:none}
+ #entryFlow{transition:none;isolation:auto}
+ #entryFlow::before{animation:none;transform:none}
+ #entryFlow .entryCard.entry-enter,#entryFlow .entryCard.entry-exit{animation:none}
+ #entryFlow .entryButtons button,#entryFlow .entryButtons button::before{animation:none;transition:none;transform:none}
  #player{font-size:16px}
 }
 @media (any-pointer:coarse) and (min-width:651px){
@@ -417,11 +420,12 @@ function closeEntry(){
  entryTransition=null;
  entryStep=null;
  entry.classList.add('hidden');
+ entry.remove();
 }
 function showEntry(step,immediate=false){
  if(entryTransition){clearTimeout(entryTransition);entryTransition=null;}
  const card=entry.querySelector('.entryCard');
- const draw=()=>{entryStep=step;entry.classList.remove('hidden');entryContent.innerHTML='';$('entryBack').classList.toggle('hidden',step==='role');
+ const draw=()=>{if(!entry.isConnected)document.body.append(entry);entryStep=step;entry.classList.remove('hidden');entryContent.innerHTML='';$('entryBack').classList.toggle('hidden',step==='role');
 if(step==='role'){entryTitle.textContent='💣 ¿Quién eres?';entryDescription.textContent='Selecciona cómo ingresar a KABOOM.';entryContent.innerHTML='<div class="entryButtons"><button id="enterStudent" class="primary">🎒 ESTUDIANTE<span>Jugar y competir</span></button><button id="enterTeacher">👨‍🏫 PROFESOR<span>Gestionar actividades</span></button></div>';$('enterStudent').onclick=()=>{currentRole='student';applyRoleTheme('student');showEntry('mode')};$('enterTeacher').onclick=()=>showEntry('teacher');}
 else if(step==='teacher'){entryTitle.textContent='🔐 Acceso del profesor';entryDescription.textContent='Inicia sesión con tu cuenta autorizada de Supabase.';entryContent.innerHTML='<form id="teacherAuthForm" class="teacherAuthForm"><label for="teacherEmail">Correo electrónico</label><input id="teacherEmail" type="email" autocomplete="username" required placeholder="Correo del profesor"><label for="teacherPass">Contraseña</label><input id="teacherPass" type="password" autocomplete="current-password" required placeholder="Contraseña"><button id="teacherLogin" type="submit" class="primary">🔐 ENTRAR AL PANEL</button></form><p id="teacherError" class="entryNotice" role="alert" aria-live="polite"></p><p class="entryNotice">El acceso se verifica con Supabase Auth y la tabla de profesores autorizados. No se guarda tu contraseña en el navegador.</p>';$('teacherAuthForm').onsubmit=async ev=>{ev.preventDefault();const btn=$('teacherLogin'),error=$('teacherError');btn.disabled=true;btn.textContent='Verificando acceso…';error.textContent='';try{const email=$('teacherEmail').value.trim(),password=$('teacherPass').value;const login=await fetch(SB_URL+'/auth/v1/token?grant_type=password',{method:'POST',headers:{'apikey':SB_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password})});const result=await login.json();if(!login.ok||!result.access_token)throw Error('Correo o contraseña incorrectos. Comprueba los datos en Supabase Auth.');const check=await fetch(SB_URL+'/rest/v1/kaboom_teachers?select=user_id&user_id=eq.'+encodeURIComponent(result.user.id),{headers:{apikey:SB_KEY,Authorization:'Bearer '+result.access_token}});if(!check.ok)throw Error('No se pudo verificar el permiso docente ('+check.status+').');const allowed=await check.json();if(!Array.isArray(allowed)||!allowed.length)throw Error('Esta cuenta no tiene permiso de profesor en KABOOM.');teacherToken=result.access_token;currentRole='teacher';applyRoleTheme('teacher');closeEntry();document.querySelectorAll('nav button').forEach(b=>b.classList.remove('hidden'));tab('dashboard');showTeacherLogout();loadCloudActivities();syncTeacherLists().catch(()=>{});}catch(e){error.textContent=e.message||'Error al iniciar sesión.'}finally{btn.disabled=false;btn.textContent='🔐 ENTRAR AL PANEL'}};}
 else if(step==='mode'){entryTitle.textContent='🎮 Elige tu modalidad';entryDescription.textContent='¿Quieres practicar o competir en un desafío?';entryContent.innerHTML='<div class="entryButtons"><button id="chooseFree" class="freeModeChoice">🎮 MODO LIBRE<span>Practica sin nota evaluada · Intentos ilimitados · Pausa disponible</span></button><button id="chooseChallenge" class="challengeModeChoice"><b class="challengeTag">⭐ EVENTO DE CLASE</b><strong>👑 MODO DESAFÍO</strong><span>Intentos definidos por el docente · Preguntas online · Sin pausa</span><em>🏆 ENTRAR AL DESAFÍO</em></button></div>';$('chooseFree').onclick=()=>{chooseMode('free');enterStudentGame()};$('chooseChallenge').onclick=()=>showEntry('challenges');}
@@ -436,7 +440,7 @@ else if(step==='challenges'){
  (async()=>{try{const rows=await kaboomRpc('kaboom_catalog_challenges',{});if(entryStep!=='challenges')return;const list=Array.isArray(rows)?rows:(rows?.challenges||[]);$('onlineCatalogStatus').textContent=list.length?'Selecciona un desafío para participar.':'No hay desafíos disponibles.';const target=$('onlineCatalog');for(const ch of list){const btn=document.createElement('button');btn.type='button';btn.className='entryChallenge';btn.textContent='💣 '+(ch.title||'Desafío');const small=document.createElement('small');small.textContent=(ch.activity_title||ch.subject||'Actividad online')+(challengeRequiresPin(ch)?' · PIN requerido':' · Sin PIN');btn.append(small);btn.onclick=()=>{onlineChallenge=ch;onlineVerifiedPin=verifiedChallengePins.get(String(ch.id))||'';if(challengeRequiresPin(ch)&&!onlineVerifiedPin){showEntry('challenge-pin');return}chooseMode('challenge');enterStudentGame();$('setupError').textContent='Introduce tu nombre y dificultad para iniciar.';ensureOnlinePin()};target.append(btn)}}catch(e){if(entryStep==='challenges')$('onlineCatalogStatus').textContent='No se pudieron cargar los desafíos: '+e.message}})();
 }
  };
- if(immediate||entry.classList.contains('hidden')||matchMedia('(pointer: coarse)').matches){draw();card.classList.remove('entry-exit');card.classList.remove('entry-enter');void card.offsetWidth;card.classList.add('entry-enter');return;}
+ if(immediate||entry.classList.contains('hidden')||navigator.maxTouchPoints>0||matchMedia('(any-pointer: coarse)').matches){draw();card.classList.remove('entry-exit');card.classList.remove('entry-enter');void card.offsetWidth;card.classList.add('entry-enter');return;}
  card.classList.remove('entry-enter');card.classList.add('entry-exit');
  entryTransition=setTimeout(()=>{draw();card.classList.remove('entry-exit');void card.offsetWidth;card.classList.add('entry-enter');entryTransition=null;},230);
 }
