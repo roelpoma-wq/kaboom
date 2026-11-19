@@ -626,15 +626,79 @@ async function syncTeacherLists(){
 }
 $('syncTeacherLists').onclick=syncTeacherLists;
 $('backupTeacherLists').onclick=()=>download('kaboom-mis-listas-respaldo.json',JSON.stringify({format:'kaboom-lists-backup-v1',lists},null,2));
-function renderLists(){$('listCards').innerHTML=lists.map(l=>`<div class="listCard"><h3>${esc(l.title)}</h3><p class="muted">${esc(l.subject||'Sin asignatura')} · ${l.items.length} parejas</p><div class="row"><button class="small primary" data-act="publish" data-id="${esc(l.id)}">${getPublishedActivityIds()[l.id]?'☁️ Actualizar online':'☁️ Publicar online'}</button><button class="small" data-act="difficulty" data-id="${esc(l.id)}">⚙️ Niveles</button><button class="small" data-act="edit" data-id="${esc(l.id)}">Editar</button><button class="small" data-act="dup" data-id="${esc(l.id)}">Duplicar</button><button class="small" data-act="export" data-id="${esc(l.id)}">Exportar</button><button class="small danger" data-act="delete" data-id="${esc(l.id)}">Eliminar</button></div></div>`).join('');$('listCards').querySelectorAll('button').forEach(b=>b.onclick=async()=>{let l=lists.find(x=>x.id===b.dataset.id);if(!l)return;switch(b.dataset.act){case'publish':publishListOnline(l,b);break;case'difficulty':configureListDifficulty(l);break;case'edit':openEditor(l);break;case'dup':lists.push({...structuredClone(l),id:uid(),title:l.title+' (copia)'});persist(key,lists);refreshSelects();renderLists();break;case'export':download(l.title+'.json',JSON.stringify({format:'kaboom-list-v1',list:l},null,2));break;case'delete':if(confirm('¿Eliminar esta lista de tu biblioteca? No se borrarán actividades online ni resultados.')){if(teacherToken&&currentRole==='teacher'){try{await teacherListDelete(l)}catch(e){alert('No se eliminó la lista: '+e.message);break}}lists=lists.filter(x=>x.id!==l.id);persist(key,lists);refreshSelects();renderLists()}break}})}function uid(){return 'l_'+Date.now().toString(36)+Math.random().toString(36).slice(2,7)}function openEditor(l){getActivitySeconds(l).forEach((n,i)=>{$('activitySeconds'+i).value=n});editId=l?.id||null;editItems=l?structuredClone(l.items):[];$('questionPlacement').value=['auto','inside','outside'].includes(l?.items?.[0]?.questionPlacement)?l.items[0].questionPlacement:'auto';$('listTitle').value=l?.title||'';$('listSubject').value=l?.subject||'';$('editorTitle').textContent=l?'Editar lista':'Nueva lista';$('listEditor').classList.remove('hidden');renderRows();$('listEditor').scrollIntoView({behavior:'smooth'})}function renderRows(){$('editorRows').innerHTML=editItems.map((it,i)=>`<div class="editorRow"><div><input data-i="${i}" data-k="q" value="${it.q?.startsWith('data:image/')?'[Imagen]':esc(it.q)}" placeholder="Pregunta" ${it.q?.startsWith('data:image/')?'readonly':''}><input type="file" accept="image/*" data-image="q" data-i="${i}" aria-label="Imagen pregunta" style="font-size:10px;padding:3px"></div><div><input data-i="${i}" data-k="a" value="${it.a?.startsWith('data:image/')?'[Imagen]':esc(it.a)}" placeholder="Respuesta" ${it.a?.startsWith('data:image/')?'readonly':''}><input type="file" accept="image/*" data-image="a" data-i="${i}" aria-label="Imagen respuesta" style="font-size:10px;padding:3px"></div><button class="danger small" data-remove="${i}">✕</button></div>`).join('');$('editorRows').querySelectorAll('input[data-k]').forEach(e=>e.oninput=()=>editItems[Number(e.dataset.i)][e.dataset.k]=e.value);$('editorRows').querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{editItems.splice(Number(b.dataset.remove),1);renderRows()});$('editorRows').querySelectorAll('input[data-image]').forEach(e=>e.onchange=async()=>{let f=e.files[0];if(!f)return;if(f.size>2e6){alert('Imagen muy grande. Usa una imagen de menos de 2 MB.');return}let reader=new FileReader();reader.onload=()=>{editItems[Number(e.dataset.i)][e.dataset.image]=reader.result;renderRows()};reader.readAsDataURL(f)})}$('newList').onclick=()=>openEditor(null);$('addRow').onclick=()=>{editItems.push({q:'',a:'',wrong:[]});renderRows()};$('pasteAdd').onclick=()=>{let text=$('pasteArea').value.trim();if(!text)return;let rows=text.split(/\r?\n/).map(line=>line.split('\t').map(s=>s.trim())).filter(row=>row.length>=2&&row[0]&&row[1]);editItems.push(...rows.map(r=>({q:r[0],a:r[1],wrong:r.slice(2,5).filter(Boolean)})));$('pasteArea').value='';renderRows();toast(rows.length+' filas agregadas')};$('saveList').onclick=async()=>{let title=$('listTitle').value.trim();if(!title){$('editorError').textContent='Escribe un título.';return}let items=editItems.filter(x=>x.q&&x.a);if(items.length<4){$('editorError').textContent='Necesitas al menos 4 preguntas válidas.';return}const placement=$('questionPlacement').value;items=items.map(item=>({...item,questionPlacement:placement}));let seconds;try{seconds=readActivitySeconds('activitySeconds')}catch(e){$('editorError').textContent=e.message;return}let old=lists.find(x=>x.id===editId);let l={id:editId||uid(),title,subject:$('listSubject').value.trim(),items,difficulty_config:activityDifficultyConfig(old,seconds)};let updated=editId?lists.map(x=>x.id===editId?l:x):[...lists,l];if(!persist(key,updated)){
+function renderLists(){$('listCards').innerHTML=lists.map(l=>`<div class="listCard"><h3>${esc(l.title)}</h3><p class="muted">${esc(l.subject||'Sin asignatura')} · ${l.items.length} parejas</p><div class="row"><button class="small primary" data-act="publish" data-id="${esc(l.id)}">${getPublishedActivityIds()[l.id]?'☁️ Actualizar online':'☁️ Publicar online'}</button><button class="small" data-act="difficulty" data-id="${esc(l.id)}">⚙️ Niveles</button><button class="small" data-act="edit" data-id="${esc(l.id)}">Editar</button><button class="small" data-act="dup" data-id="${esc(l.id)}">Duplicar</button><button class="small" data-act="export" data-id="${esc(l.id)}">Exportar</button><button class="small danger" data-act="delete" data-id="${esc(l.id)}">Eliminar</button></div></div>`).join('');$('listCards').querySelectorAll('button').forEach(b=>b.onclick=async()=>{let l=lists.find(x=>x.id===b.dataset.id);if(!l)return;switch(b.dataset.act){case'publish':publishListOnline(l,b);break;case'difficulty':configureListDifficulty(l);break;case'edit':openEditor(l);break;case'dup':lists.push({...structuredClone(l),id:uid(),title:l.title+' (copia)'});persist(key,lists);refreshSelects();renderLists();break;case'export':download(l.title+'.json',JSON.stringify({format:'kaboom-list-v1',list:l},null,2));break;case'delete':if(confirm('¿Eliminar esta lista de tu biblioteca? No se borrarán actividades online ni resultados.')){if(teacherToken&&currentRole==='teacher'){try{await teacherListDelete(l)}catch(e){alert('No se eliminó la lista: '+e.message);break}}lists=lists.filter(x=>x.id!==l.id);persist(key,lists);refreshSelects();renderLists()}break}})}function uid(){return 'l_'+Date.now().toString(36)+Math.random().toString(36).slice(2,7)}let listEditorOpener=null;
+function openEditor(list){
+ const editor=$('listEditor');
+ listEditorOpener=document.activeElement;
+ getActivitySeconds(list).forEach((n,i)=>{$('activitySeconds'+i).value=n});
+ editId=list?.id||null;
+ editItems=list?JSON.parse(JSON.stringify(list.items)):[];
+ $('questionPlacement').value=['auto','inside','outside'].includes(list?.items?.[0]?.questionPlacement)?list.items[0].questionPlacement:'auto';
+ $('listTitle').value=list?.title||'';
+ $('listSubject').value=list?.subject||'';
+ $('editorTitle').textContent=list?'Editar lista':'Nueva lista';
+ $('editorError').textContent='';
+ $('pasteArea').value='';
+ editor.classList.remove('hidden');
+ document.body.classList.add('cloudQuestionsOpen');
+ renderRows();
+ editor.scrollTop=0;
+ $('cancelEdit').focus();
+}
+function closeListEditor(){
+ $('listEditor').classList.add('hidden');
+ document.body.classList.remove('cloudQuestionsOpen');
+ (listEditorOpener?.isConnected?listEditorOpener:$('newList')).focus();
+ listEditorOpener=null;
+}
+$('listEditor').addEventListener('keydown',event=>{
+ if(event.key==='Escape'){event.preventDefault();closeListEditor();return}
+ if(event.key!=='Tab')return;
+ const controls=[...$('listEditor').querySelectorAll('button:not(:disabled),input:not(:disabled),select,textarea')];
+ const first=controls[0],last=controls[controls.length-1];
+ const boundary=event.shiftKey?first:last;
+ if(document.activeElement===boundary){event.preventDefault();(event.shiftKey?last:first).focus()}
+});
+function listEditorText(label,value,attrs,image=false){
+ const file=attrs.includes('data-k=')?'<input type="file" accept="image/*" aria-label="Imagen de '+label.toLowerCase()+'">':'';
+ return '<label>'+label+'<textarea '+attrs+(image?' readonly':'')+'>'+esc(image?'[Imagen]':value)+'</textarea>'+file+'</label>';
+}
+function renderRows(){
+ const rows=$('editorRows');
+ rows.innerHTML=editItems.map((item,i)=>{
+  const question=listEditorText('Pregunta',item.q,'data-k="q"',typeof item.q==='string'&&item.q.startsWith('data:image/'));
+  const correct=listEditorText('Respuesta correcta',item.a,'data-k="a" data-answer-kind="correct"',typeof item.a==='string'&&item.a.startsWith('data:image/'));
+  const wrong=Array.isArray(item.wrong)?item.wrong:[];
+  const alternatives=Array.from({length:Math.max(3,wrong.length)},(_,j)=>listEditorText('Incorrecta '+(j+1),wrong[j], 'data-wrong="'+j+'" data-answer-kind="incorrect"'));
+  return '<div class="editorRow" data-item="'+i+'"><div class="localEditorRowTitle"><strong>Pregunta '+(i+1)+'</strong><button type="button" class="danger small" data-remove>Quitar</button></div>'+question+correct+'<div class="cloudWrongGrid">'+alternatives.join('')+'</div></div>';
+ }).join('');
+ rows.querySelectorAll('[data-item]').forEach(row=>{
+  const item=editItems[Number(row.dataset.item)];
+  row.querySelectorAll('textarea[data-k]:not([readonly])').forEach(el=>el.oninput=()=>{item[el.dataset.k]=el.value});
+  row.querySelectorAll('textarea[data-wrong]').forEach(el=>el.oninput=()=>{
+   if(!Array.isArray(item.wrong))item.wrong=[];
+   item.wrong[Number(el.dataset.wrong)]=el.value;
+  });
+  row.querySelector('[data-remove]').onclick=()=>{editItems.splice(Number(row.dataset.item),1);renderRows()};
+  row.querySelectorAll('input[type=file]').forEach(el=>el.onchange=()=>{
+   const file=el.files[0];
+   if(!file)return;
+   if(file.size>2e6){alert('Imagen muy grande. Usa una imagen de menos de 2 MB.');return}
+   const field=el.parentElement.querySelector('textarea').dataset.k;
+   const reader=new FileReader();
+   reader.onload=()=>{if(editItems.includes(item)){item[field]=reader.result;renderRows()}};
+   reader.readAsDataURL(file);
+  });
+ });
+}
+$('newList').onclick=()=>openEditor(null);$('addRow').onclick=()=>{editItems.push({q:'',a:'',wrong:[]});renderRows()};$('pasteAdd').onclick=()=>{let text=$('pasteArea').value.trim();if(!text)return;let rows=text.split(/\r?\n/).map(line=>line.split('\t').map(s=>s.trim())).filter(row=>row.length>=2&&row[0]&&row[1]);editItems.push(...rows.map(r=>({q:r[0],a:r[1],wrong:r.slice(2,5).filter(Boolean)})));$('pasteArea').value='';renderRows();toast(rows.length+' filas agregadas')};$('saveList').onclick=async()=>{let title=$('listTitle').value.trim();if(!title){$('editorError').textContent='Escribe un título.';return}let items=editItems.filter(x=>x.q&&x.a);if(items.length<4){$('editorError').textContent='Necesitas al menos 4 preguntas válidas.';return}const placement=$('questionPlacement').value;items=items.map(item=>({...item,wrong:(Array.isArray(item.wrong)?item.wrong:[]).filter(x=>typeof x==='string'&&x.trim()),questionPlacement:placement}));let seconds;try{seconds=readActivitySeconds('activitySeconds')}catch(e){$('editorError').textContent=e.message;return}let old=lists.find(x=>x.id===editId);let l={id:editId||uid(),title,subject:$('listSubject').value.trim(),items,difficulty_config:activityDifficultyConfig(old,seconds)};let updated=editId?lists.map(x=>x.id===editId?l:x):[...lists,l];if(!persist(key,updated)){
  $('editorError').textContent='No se pudo guardar la lista en este dispositivo.';
  return;
 }
 lists=updated;
-$('listEditor').classList.add('hidden');
-$('editorError').textContent='';
 refreshSelects();
 renderLists();
+closeListEditor();
 if(!teacherToken||currentRole!=='teacher')return;
 const status=$('syncTeacherListsStatus');
 const activityId=getPublishedActivityIds()[l.id];
@@ -654,7 +718,7 @@ try{
  }
  status.textContent=errors.length?'Guardada en este dispositivo. '+errors.join(' '):activityId?'✓ Lista y actividad online actualizadas.':'✓ Lista guardada en la biblioteca docente.';
 }finally{saveButton.disabled=false}
-};$('cancelEdit').onclick=()=>$('listEditor').classList.add('hidden');function download(name,content){let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type:'application/json'}));a.download=name.replace(/[^\w.áéíóúüñ -]/gi,'_');a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500)}$('importJson').onclick=()=>$('jsonFile').click();$('jsonFile').onchange=async e=>{let f=e.target.files[0];if(!f)return;try{let obj=JSON.parse(await f.text());let l=obj.list||obj;if(!l.title||!Array.isArray(l.items)||l.items.length<4||!l.items.every(x=>typeof x.q==='string'&&typeof x.a==='string'))throw Error('Formato inválido');lists.push({id:uid(),title:l.title,subject:l.subject||'',items:l.items.map(x=>({q:x.q,a:x.a,wrong:Array.isArray(x.wrong)?x.wrong:[],questionPlacement:['inside','outside','auto'].includes(x.questionPlacement)?x.questionPlacement:'auto'}))});persist(key,lists);refreshSelects();renderLists()}catch(e){alert('No se pudo importar la lista: '+e.message)}e.target.value=''};
+};$('cancelEdit').onclick=closeListEditor;function download(name,content){let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type:'application/json'}));a.download=name.replace(/[^\w.áéíóúüñ -]/gi,'_');a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500)}$('importJson').onclick=()=>$('jsonFile').click();$('jsonFile').onchange=async e=>{let f=e.target.files[0];if(!f)return;try{let obj=JSON.parse(await f.text());let l=obj.list||obj;if(!l.title||!Array.isArray(l.items)||l.items.length<4||!l.items.every(x=>typeof x.q==='string'&&typeof x.a==='string'))throw Error('Formato inválido');lists.push({id:uid(),title:l.title,subject:l.subject||'',items:l.items.map(x=>({q:x.q,a:x.a,wrong:Array.isArray(x.wrong)?x.wrong:[],questionPlacement:['inside','outside','auto'].includes(x.questionPlacement)?x.questionPlacement:'auto'}))});persist(key,lists);refreshSelects();renderLists()}catch(e){alert('No se pudo importar la lista: '+e.message)}e.target.value=''};
 
 function freeResultPayload(r){
  return {id:String(r.id),name:String(r.name||'').slice(0,60),list_id:String(r.listId||'').slice(0,120),list_title:String(r.listTitle||'Lista').slice(0,160),level:Number(r.level),correct:Number(r.correct),total:Number(r.total),score:Number(r.score),grade:r.grade||null,normalized:Number(r.normalized)||0,range_label:r.range||null,direction:r.direction||null,played_at:r.date||new Date().toISOString(),original_score:braveryOriginal(r),original_normalized:Number(r.originalNormalized??r.normalized)||0,scoring_version:r.scoringVersion||null};
