@@ -90,7 +90,7 @@ function start(){
   button.setAttribute('aria-label','Bomba '+(index+1));
   button.onclick=()=>choose(reward,button);
   arena.appendChild(button);
-  return {button,slot:index,from:index,to:index};
+  return {button,slot:index,from:index,to:index,bend:0};
  });
  controls.forEach(control=>control.disabled=true);
  element('start').disabled=true;
