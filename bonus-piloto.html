@@ -13,10 +13,12 @@ button,select{font:inherit;color:inherit;background:#283660;border:1px solid #69
 button:enabled{cursor:pointer}
 button:focus-visible,select:focus-visible{outline:3px solid #80ffe2}
 #arena{height:350px;position:relative;overflow:hidden;margin:14px 0;background:#182144;border-radius:16px}
-.bomb{width:82px;height:64px;padding:0;position:absolute;top:0;left:0;background:#34394d;border:2px solid #f5bf6d;color:#fff;touch-action:manipulation}
+.bomb{width:58px;height:58px;padding:0;position:absolute;top:0;left:0;border-radius:50%;background:radial-gradient(circle at 34% 27%,#555d7b,#252b43 55%,#111626);border:2px solid #8290bd;color:#fff;touch-action:manipulation}
+.bomb::before{content:'';position:absolute;left:33px;top:-12px;width:13px;height:15px;border:3px solid #e1a66c;border-left:0;border-bottom:0;border-radius:0 12px 0 0;transform:rotate(-25deg)}
+.bomb::after{content:'';position:absolute;left:44px;top:-11px;width:6px;height:6px;border-radius:50%;background:#ffce6a}
 .bomb:disabled{opacity:1}
-.bomb span{display:block;font-size:24px;line-height:1.15}
-.bomb b{font-size:14px;color:#ffe4a6}
+.bomb b{font-size:15px;color:#ffe4a6;position:relative}
+.bomb:enabled{border-color:#f5bf6d}
 #status{min-height:2.8em;margin-bottom:0}
 #scoreboard{color:#a7f8e4}
 </style>
@@ -38,7 +40,7 @@ button:focus-visible,select:focus-visible{outline:3px solid #80ffe2}
 const element=id=>document.getElementById(id);
 const arena=element('arena');
 const controls=['level','items','bonus'].map(element);
-const counts=[4,6,9,9],revealTimes=[5,4.5,4,3.5],shuffleTimes=[5,7,8.5,10],moveTimes=[1.05,.90,.76,.64];
+const counts=[4,6,9,9],revealTimes=[5.5,5,4.5,4.5],shuffleTimes=[5,7,8.5,10],moveTimes=[1.24,1.17,1.10,1.04],fastMoveTimes=[.90,.77,.66,.56];
 const clock='clock',hand='hand',heart='heart';
 let level=-1,itemsEnabled=false,score=0,inventory={},phase='idle',elapsed=0,moveElapsed=0,moveDuration=0,previousPattern=-1,last=0,bombs=[];
 function shuffle(values){
@@ -73,7 +75,7 @@ function start(){
  bombs=rewards.map((reward,index)=>{
   const button=document.createElement('button');
   button.type='button';button.className='bomb';button.disabled=true;
-  button.innerHTML='<span aria-hidden="true">💣</span><b></b>';
+  button.innerHTML='<b aria-hidden="true"></b>';
   button.lastElementChild.textContent=label(reward);
   button.setAttribute('aria-label','Bomba '+(index+1));
   button.onclick=()=>choose(reward);
@@ -86,27 +88,25 @@ function start(){
  show('Memoriza los premios.');
  requestAnimationFrame(frame);
 }
-function destination(slot,pattern,columns,rows,total){
- const row=Math.floor(slot/columns),column=slot%columns;
- if(pattern===0)return row*columns+(column+1)%columns;
- if(pattern===1)return ((row+1)%rows)*columns+column;
- if(pattern===2)return ((row+1)%rows)*columns+(column+1)%columns;
- const center=Math.floor(total/2),neighbor=center+1,target=total-1-slot;
- return total%2===0?target:target===center?neighbor:target===neighbor?center:target;
-}
 function move(){
- const total=bombs.length,columns=total===4?2:3,rows=total/columns;
+ const total=bombs.length,columns=total===4?2:3;
  const remaining=shuffleTimes[level]-elapsed;
- const duration=moveTimes[level]*(1-.22*elapsed/shuffleTimes[level]);
- if(remaining<duration*.7){moveDuration=0;return}
- const patterns=[0,1,2,3].filter(pattern=>pattern!==previousPattern);
- const pattern=patterns[Math.floor(Math.random()*patterns.length)];
- previousPattern=pattern;
+ const progress=Math.min(1,elapsed/shuffleTimes[level]);
+ const duration=moveTimes[level]+(fastMoveTimes[level]-moveTimes[level])*progress;
+ if(remaining<duration){moveDuration=0;return}
+ const pairs=[];
+ for(let i=0;i<total;i++){
+  if(i%columns+1<columns)pairs.push([i,i+1]);
+  if(i+columns<total)pairs.push([i,i+columns]);
+ }
+ const candidates=pairs.filter((_,index)=>index!==previousPattern);
+ const pair=candidates[Math.floor(Math.random()*candidates.length)];
+ previousPattern=pairs.indexOf(pair);
  bombs.forEach(bomb=>{
   bomb.from=bomb.slot;
-  bomb.to=destination(bomb.slot,pattern,columns,rows,total);
+  bomb.to=bomb.slot===pair[0]?pair[1]:bomb.slot===pair[1]?pair[0]:bomb.slot;
  });
- moveDuration=Math.min(duration,remaining);
+ moveDuration=duration;
  moveElapsed=0;
 }
 function paint(progress,drop){
@@ -114,12 +114,15 @@ function paint(progress,drop){
  const gap=Math.min(112,(arena.clientWidth-16)/columns);
  const left=arena.clientWidth/2-(columns-1)*gap/2;
  const eased=progress*progress*(3-2*progress);
- const arc=Math.sin(Math.PI*progress)*12;
+ const arc=Math.sin(Math.PI*progress)*32;
  bombs.forEach(bomb=>{
-  const x=left+((bomb.from%columns)*(1-eased)+(bomb.to%columns)*eased)*gap;
-  const y=65+(Math.floor(bomb.from/columns)*(1-eased)+Math.floor(bomb.to/columns)*eased)*74;
-  const bend=bomb.from===bomb.to?0:arc*(bomb.from%2?1:-1);
-  bomb.button.style.transform='translate3d('+(x-41)+'px,'+(y+bend+drop*(arena.clientHeight-y-32)-32)+'px,0)';
+  const fromX=left+(bomb.from%columns)*gap;
+  const fromY=59+Math.floor(bomb.from/columns)*84;
+  const dx=((bomb.to%columns)-(bomb.from%columns))*gap;
+  const dy=(Math.floor(bomb.to/columns)-Math.floor(bomb.from/columns))*84;
+  const x=fromX+dx*eased-Math.sign(dy)*arc;
+  const y=fromY+dy*eased+Math.sign(dx)*arc;
+  bomb.button.style.transform='translate3d('+(x-29)+'px,'+(y+drop*(arena.clientHeight-y-29)-29)+'px,0)';
  });
 }
 function frame(now){
