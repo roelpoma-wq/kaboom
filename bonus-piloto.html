@@ -27,6 +27,10 @@ button:focus-visible,select:focus-visible{outline:3px solid #80ffe2}
 @keyframes bonusReveal{0%{box-shadow:0 0 0 0 #ffd66b}45%{box-shadow:0 0 24px 12px #ffbf4c66}100%{box-shadow:0 0 14px 3px #ffdf8177}}
 @keyframes bonusLabel{from{opacity:0;transform:scale(.55)}to{opacity:1;transform:scale(1)}}
 @media(prefers-reduced-motion:reduce){.bomb.bonusDim{transition:none}.bomb.bonusChosen,.bomb.bonusChosen b{animation:none}}
+#chooseCountdown{min-height:1.5em;color:#ffe78b;font-weight:900;letter-spacing:.08em;text-align:center}
+.bomb.bonusBlast{animation:bonusBlast .65s ease-out both;background:#ffb83c;border-color:#fff3ac}
+@keyframes bonusBlast{0%{opacity:1;box-shadow:0 0 0 0 #ffdb67}35%{opacity:1;box-shadow:0 0 24px 22px #ff773caa}100%{opacity:0;box-shadow:0 0 40px 42px #ff773c00}}
+@media(prefers-reduced-motion:reduce){.bomb.bonusBlast{animation:none;opacity:.35}}
 </style>
 <main>
 <h1>💣 Ronda bonus</h1>
@@ -36,7 +40,7 @@ button:focus-visible,select:focus-visible{outline:3px solid #80ffe2}
 <label><input id="bonus" type="checkbox" checked> Ronda bonus</label>
 <button id="start">Probar ronda</button>
 </div>
-<p id="status" role="status">Selecciona la dificultad y prueba la ronda.</p>
+<div id="chooseCountdown" aria-hidden="true"></div><p id="status" role="status">Selecciona la dificultad y prueba la ronda.</p>
 <div id="arena" aria-label="Bombas de la ronda bonus"></div>
 <p id="scoreboard"></p>
 </main>
@@ -48,7 +52,7 @@ const arena=element('arena');
 const controls=['level','items','bonus'].map(element);
 const bombCount=9,columns=3,revealTimes=[5,4.5,4,3.5],shuffleTimes=[5,8,10,12],shufflePowers=[4,5,7,8];
 const clock='clock',hand='hand',heart='heart';
-let level=-1,itemsEnabled=false,score=0,inventory={},phase='idle',elapsed=0,moveElapsed=0,lastPattern=-1,last=0,bombs=[];
+let level=-1,itemsEnabled=false,score=0,inventory={},phase='idle',elapsed=0,moveElapsed=0,previousMoves=[],last=0,bombs=[];
 function shuffle(values){
  const copy=values.slice();
  for(let i=copy.length-1;i>0;i--){
@@ -70,7 +74,7 @@ function start(){
   level=next;itemsEnabled=nextItems;score=0;
   inventory={clock:itemsEnabled?Math.ceil((4-level)/2):0,hand:itemsEnabled?Math.floor((4-level)/2):0,heart:0};
  }
- updateScore();arena.textContent='';
+ updateScore();arena.textContent='';element('chooseCountdown').textContent='';
  if(!element('bonus').checked){show('Ronda bonus desactivada.');return}
  const total=bombCount;
  const pointPool=[50,100,200,-100,-200,50,100,200,-100];
@@ -90,27 +94,25 @@ function start(){
  });
  controls.forEach(control=>control.disabled=true);
  element('start').disabled=true;
- phase='reveal';elapsed=0;last=performance.now();lastPattern=-1;paint(1,0);
+ phase='reveal';elapsed=0;last=performance.now();previousMoves=[];paint(1,0);
  show('Memoriza los premios.');
  requestAnimationFrame(frame);
 }
 function move(){
- const patterns=[0,1,2,3].filter(value=>value!==lastPattern);
- const pattern=patterns[Math.floor(Math.random()*patterns.length)];
- const horizontal=Math.random()<.5?1:2;
- const vertical=Math.random()<.5?1:2;
- lastPattern=pattern;
+ const slots=shuffle(Array.from({length:bombCount},(_,index)=>index));
+ const next=Array.from({length:bombCount},(_,index)=>index);
+ const groupSize=3+Math.floor(Math.random()*3);
+ const group=slots.slice(0,groupSize);
+ group.forEach((slot,index)=>{next[slot]=group[(index+1)%group.length]});
+ const pair=slots.slice(groupSize,groupSize+2);
+ if(Math.random()<.65&&previousMoves[pair[0]]!==pair[1]){
+  next[pair[0]]=pair[1];next[pair[1]]=pair[0];
+ }
+ previousMoves=next;
  bombs.forEach(bomb=>{
-  const slot=bomb.slot,row=Math.floor(slot/columns),column=slot%columns;
-  const nextRow=(row+vertical)%columns,nextColumn=(column+horizontal)%columns;
-  bomb.from=slot;
-  if(pattern===0)bomb.to=row*columns+nextColumn;
-  else if(pattern===1)bomb.to=nextRow*columns+column;
-  else if(pattern===2)bomb.to=nextRow*columns+nextColumn;
-  else{
-   const opposite=bombCount-1-slot;
-   bomb.to=opposite===4?5:opposite===5?4:opposite;
-  }
+  bomb.from=bomb.slot;
+  bomb.to=next[bomb.slot];
+  bomb.bend=Math.random()<.5?1:-1;
  });
  moveElapsed=0;
 }
@@ -123,8 +125,10 @@ function paint(progress,drop){
   const fromY=59+Math.floor(bomb.from/columns)*84;
   const dx=((bomb.to%columns)-(bomb.from%columns))*gap;
   const dy=(Math.floor(bomb.to/columns)-Math.floor(bomb.from/columns))*84;
-  const x=fromX+dx*eased;
-  const y=fromY+dy*eased;
+  const distance=Math.sqrt(dx*dx+dy*dy)||1;
+  const arc=Math.sin(Math.PI*progress)*24*bomb.bend;
+  const x=fromX+dx*eased-dy/distance*arc;
+  const y=fromY+dy*eased+dx/distance*arc;
   bomb.button.style.transform='translate3d('+(x-29)+'px,'+(y+drop*(arena.clientHeight-y-29)-29)+'px,0)';
  });
 }
@@ -135,6 +139,9 @@ function frame(now){
   bombs.forEach(bomb=>bomb.button.lastElementChild.textContent='');
   phase='shuffle';elapsed=0;move();show('Sigue la bomba que elegiste.');
  }else if(phase==='shuffle'){
+  const remaining=Math.ceil(shuffleTimes[level]-elapsed);
+  const cue=remaining>=1&&remaining<=5?'CHOOSE IN '+remaining:'';
+  if(element('chooseCountdown').textContent!==cue)element('chooseCountdown').textContent=cue;
   const progress=Math.min(1,elapsed/shuffleTimes[level]);
   const duration=Math.max(.64-(shufflePowers[level]-1)*(.41/9),1.22-progress*(level>=2?1.06:.91)-level*.035);
   moveElapsed+=dt/duration;
@@ -142,21 +149,19 @@ function frame(now){
   if(moveElapsed>=1){
    bombs.forEach(bomb=>bomb.slot=bomb.to);
    if(elapsed>=shuffleTimes[level]){
-    phase='choose';elapsed=0;show('Elige tu bomba · 5 s');
+    phase='choose';elapsed=0;element('chooseCountdown').textContent='NOW!';show('Elige tu bomba · 5 s');
     bombs.forEach(bomb=>bomb.button.disabled=false);
    }else move();
   }
  }else if(phase==='choose'){
-  if(elapsed>=5){phase='attack';elapsed=0;show('¡Las bombas se acercan!')}
+  if(elapsed>=5){explodeAll();return}
   else{const message='Elige tu bomba · '+Math.ceil(5-elapsed)+' s';if(element('status').textContent!==message)show(message)}
- }else if(phase==='attack'){
-  paint(1,Math.min(1,elapsed/3.5));
-  if(elapsed>=3.5){finish('Tiempo agotado.');return}
  }
  requestAnimationFrame(frame);
 }
 function choose(reward,button){
- if(phase!=='choose'&&phase!=='attack')return;
+ if(phase!=='choose')return;
+ element('chooseCountdown').textContent='';
  if(typeof reward==='number')score=Math.max(0,score+reward);
  else inventory[reward]++;
  phase='result';
@@ -175,10 +180,19 @@ function choose(reward,button){
   element('start').disabled=false;
  },850);
 }
-function finish(message){
- phase='idle';arena.textContent='';show(message);updateScore();
- controls.forEach(control=>control.disabled=false);
- element('start').disabled=false;
+function explodeAll(){
+ phase='result';
+ element('chooseCountdown').textContent='';
+ bombs.forEach(bomb=>{
+  bomb.button.disabled=true;
+  bomb.button.classList.add('bonusBlast');
+ });
+ show('¡Tiempo agotado! Explotaron las nueve bombas.');
+ setTimeout(()=>{
+  phase='idle';arena.textContent='';
+  controls.forEach(control=>control.disabled=false);
+  element('start').disabled=false;
+ },650);
 }
 element('start').onclick=start;
 })();
