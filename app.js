@@ -124,6 +124,52 @@ function createActivityUuid(){
 document.querySelectorAll('[data-dashboard-tab]').forEach(b=>b.addEventListener('click',()=>tab(b.dataset.dashboardTab)));
 async function teacherChallengeRpc(fn,args={}){if(!teacherToken||currentRole!=='teacher')throw Error('Acceso docente requerido');const res=await fetch(SB_URL+'/rest/v1/rpc/'+fn,{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+teacherToken,'Content-Type':'application/json'},body:JSON.stringify(args)});const raw=await res.text();let value;try{value=JSON.parse(raw)}catch{value=raw}if(!res.ok)throw Error(value?.message||raw.slice(0,220));return value}
 let teacherResultsData=[];
+let removedFreeMarks=new Set();
+async function loadRemovedFreeMarks(){
+ const ids=new Set();
+ for(let offset=0;;offset+=1000){
+  const response=await fetch(SB_URL+'/rest/v1/kaboom_removed_free_marks?select=id&order=id&limit=1000&offset='+offset,{headers:{apikey:SB_KEY}});
+  if(!response.ok)throw Error('No se pudieron verificar las marcas borradas.');
+  const rows=await response.json();
+  rows.forEach(row=>ids.add(String(row.id)));
+  if(rows.length<1000)break;
+ }
+ removedFreeMarks=ids;
+}
+function visibleFreeMark(row){return (row.mode||'free')==='free'&&!removedFreeMarks.has(String(row.id))}
+async function teacherMarkRows(){
+ const [challenge,free]=await Promise.all([teacherChallengeRpc('kaboom_teacher_results'),fetchFreeResults(),loadRemovedFreeMarks()]);
+ if(!Array.isArray(challenge))throw Error('Respuesta inesperada');
+ const shared=new Map(scores.filter(visibleFreeMark).map(row=>[String(row.id),row]));
+ free.filter(visibleFreeMark).forEach(row=>shared.set(String(row.id),row));
+ return challenge.filter(row=>row.challenge_id).concat(Array.from(shared.values(),row=>({
+  id:row.id,activity_id:row.listId,actividad:row.listTitle,challenge_id:'free',desafio:'Modo Libre',
+  jugador:row.name,dificultad:row.level,preguntas:row.total,aciertos:row.correct,puntaje:row.score,nota:row.grade,fecha:row.date
+ }))).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
+}
+function teacherMarkAction(row){
+ const cell=document.createElement('td'),button=document.createElement('button');
+ button.type='button';button.textContent='Borrar marca';cell.append(button);
+ button.onclick=async()=>{
+  if(!confirm('¿Borrar esta marca? '+row.jugador+' · '+row.desafio+' · Nivel '+(Number(row.dificultad)+1)+' · '+row.puntaje+' puntos'))return;
+  button.disabled=true;
+  try{
+   const mode=row.challenge_id==='free'?'free':'challenge';
+   await teacherChallengeRpc('kaboom_teacher_delete_mark',{p_mode:mode,p_id:String(row.id)});
+   if(mode==='free'){
+    removedFreeMarks.add(String(row.id));
+    const keep=item=>String(item.id)!==String(row.id);
+    scores=scores.filter(keep);
+    persist(scoreKey,scores);
+    persist(freePendingKey,getPendingFreeResults().filter(keep));
+   }
+   onlineRankCache=null;
+   teacherResultsData=teacherResultsData.filter(item=>item.id!==row.id||item.challenge_id!==row.challenge_id);
+   renderTeacherResults();
+  }catch(error){alert('No se pudo borrar la marca: '+error.message);button.disabled=false}
+ };
+ return cell;
+}
 function filteredTeacherResults(){
  const activity=$('teacherResultsActivity').value,challenge=$('teacherResultsChallenge').value,level=$('teacherResultsDifficulty').value,player=$('teacherResultsPlayer').value.trim().toLocaleLowerCase();
  return teacherResultsData.filter(r=>(!activity||r.activity_id===activity)&&(!challenge||r.challenge_id===challenge)&&(!level||String(r.dificultad)===level)&&(!player||String(r.jugador||'').toLocaleLowerCase().includes(player)))
@@ -133,15 +179,15 @@ function renderTeacherResults(){
  $('teacherResultsStatus').textContent=data.length+' resultado(s) de '+teacherResultsData.length+' registrados.';
  if(!data.length){const empty=document.createElement('p');empty.textContent='No hay resultados con estos filtros.';container.append(empty);return}
  const table=document.createElement('table');table.style.width='100%';const head=document.createElement('thead'),header=document.createElement('tr');
- for(const name of ['Fecha','Estudiante','Actividad','Desafío','Nivel','Aciertos','Puntaje','Nota']){const th=document.createElement('th');th.textContent=name;header.append(th)}head.append(header);table.append(head);
+ for(const name of ['Fecha','Estudiante','Actividad','Desafío','Nivel','Aciertos','Puntaje','Nota','Acción']){const th=document.createElement('th');th.textContent=name;header.append(th)}head.append(header);table.append(head);
  const body=document.createElement('tbody');
- for(const r of data){const tr=document.createElement('tr');for(const val of [r.fecha?new Date(r.fecha).toLocaleString('es-PE'):'',r.jugador,r.actividad,r.desafio,'Nivel '+(Number(r.dificultad)+1),r.aciertos+' / '+r.preguntas,r.puntaje,r.nota]){const td=document.createElement('td');td.textContent=String(val??'');td.style.padding='8px';tr.append(td)}body.append(tr)}table.append(body);container.append(table)
+ for(const r of data){const tr=document.createElement('tr');for(const val of [r.fecha?new Date(r.fecha).toLocaleString('es-PE'):'',r.jugador,r.actividad,r.desafio,'Nivel '+(Number(r.dificultad)+1),r.aciertos+' / '+r.preguntas,r.puntaje,r.nota]){const td=document.createElement('td');td.textContent=String(val??'');td.style.padding='8px';tr.append(td)}tr.append(teacherMarkAction(r));body.append(tr)}table.append(body);container.append(table)
 }
 async function loadTeacherResults(){
  if(!teacherToken||currentRole!=='teacher')return;
  $('teacherResultsStatus').textContent='Consultando resultados en Supabase…';
  try{
- const data=await teacherChallengeRpc('kaboom_teacher_results');if(!Array.isArray(data))throw Error('Respuesta inesperada');
+ const data=await teacherMarkRows();if(!Array.isArray(data))throw Error('Respuesta inesperada');
  teacherResultsData=data;
  const activitySel=$('teacherResultsActivity'),challengeSel=$('teacherResultsChallenge');
  const selectedActivity=activitySel.value,selectedChallenge=challengeSel.value;
@@ -996,7 +1042,7 @@ async function renderRanking(){
   onlineRankRenderSeq++;const sel=$('rankList'),selected=sel.value;
   sel.innerHTML='<option value="all">Todas las listas</option>'+lists.map(l=>'<option value="'+esc(l.id)+'">'+esc(l.title)+'</option>').join('');
   if(lists.some(l=>l.id===selected))sel.value=selected;
-  renderRankingRows(scores);$('rankBody').innerHTML='<tr><td colspan="14">Consultando resultados compartidos…</td></tr>';try{const cloud=await fetchFreeResults();if($('rankMode').value!=='free')return;const all=new Map(scores.filter(r=>(r.mode||'free')==='free').map(r=>[String(r.id),r]));for(const row of cloud)all.set(String(row.id),row);const ids=new Map(lists.map(l=>[l.id,l.title]));for(const row of all.values())if(!ids.has(row.listId))ids.set(row.listId,row.listTitle||'Lista');const chosen=sel.value;sel.innerHTML='<option value="all">Todas las listas</option>'+[...ids].map(([id,title])=>'<option value="'+esc(id)+'">'+esc(title)+'</option>').join('');if(ids.has(chosen))sel.value=chosen;renderRankingRows([...all.values()]);}catch(e){renderRankingRows(scores);console.warn('Ranking Libre local por error de conexión:',e)}return;
+  renderRankingRows(scores.filter(visibleFreeMark));$('rankBody').innerHTML='<tr><td colspan="14">Consultando resultados compartidos…</td></tr>';try{const [cloud]=await Promise.all([fetchFreeResults(),loadRemovedFreeMarks()]);if($('rankMode').value!=='free')return;const all=new Map(scores.filter(visibleFreeMark).map(r=>[String(r.id),r]));for(const row of cloud.filter(visibleFreeMark))all.set(String(row.id),row);const ids=new Map(lists.map(l=>[l.id,l.title]));for(const row of all.values())if(!ids.has(row.listId))ids.set(row.listId,row.listTitle||'Lista');const chosen=sel.value;sel.innerHTML='<option value="all">Todas las listas</option>'+[...ids].map(([id,title])=>'<option value="'+esc(id)+'">'+esc(title)+'</option>').join('');if(ids.has(chosen))sel.value=chosen;renderRankingRows([...all.values()]);}catch(e){renderRankingRows(scores.filter(visibleFreeMark));console.warn('Ranking Libre local por error de conexión:',e)}return;
  }
  const seq=++onlineRankRenderSeq;
  $('rankBody').innerHTML='<tr><td colspan="14">Cargando ranking compartido de Supabase…</td></tr>';
